@@ -13,4 +13,4 @@ os.system('convert {} {}'.format(cover_image, cover_pdf))
 # Use qpdf to concatnate cover_pdf and pdf
 os.system('qpdf --empty --pages {} {} -- {}'.format(cover_pdf, pdf, out_pdf))
 
-
+os.system('rm {} {}'.format(cover_image, cover_pdf))
