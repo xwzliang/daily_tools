@@ -2,9 +2,16 @@
 
 import os
 import sys
+import re
 
-cover_image = sys.argv[1]
-pdf = sys.argv[2]
+def rm_invalid_chars(filename):
+    filename_replace_invalid_chars = re.sub('[^A-Za-z0-9._-]', '_', filename)
+    if os.path.exists(filename):
+        os.rename(filename, filename_replace_invalid_chars)
+    return filename_replace_invalid_chars
+
+cover_image = rm_invalid_chars(sys.argv[1])
+pdf = rm_invalid_chars(sys.argv[2])
 
 cover_pdf = cover_image.split('.')[0] + '_cover.pdf'
 out_pdf = pdf.replace('.pdf', '_final.pdf')
