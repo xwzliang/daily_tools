@@ -28,7 +28,7 @@ else:
         if len(new_list_of_files) > len(old_list_of_files):	# New file added
             # get the latest file as ebook
             ebook = max(new_list_of_files, key=os.path.getctime)
-            if '.pdf' not in ebook:	# Don't convert pdf file
+            if '.pdf' not in ebook and '.jpg' not in ebook:	# Don't convert pdf file and jpg
                 convert_book(ebook)
                 time.sleep(2)
         # Update the list of files
