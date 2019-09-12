@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# Grep command's help for given argument
+
+command=$1
+arg=$2
+
+if [[ "$2" =~ ^\-.* ]]; then
+	$command --help | grep "\\$arg"
+else
+	$command --help | grep "$arg"
+fi
