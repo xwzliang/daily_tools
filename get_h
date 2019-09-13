@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+# get_h: extract C like function declarations for header file 
+
+# Find function name lines (return type followed by paratheses and left curly brace), and then replace left curly brace with semicolon
+sed -n '/^\(void\|int\|double\|char\|float\) .*(.*) *{/s/).* *{.*/);/p' "$@"
