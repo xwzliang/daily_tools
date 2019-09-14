@@ -5,8 +5,8 @@
 command=$1
 arg=$2
 
-if [[ "$2" =~ ^\-.* ]]; then
-	$command --help | grep "\\$arg"
+if [[ "$2" =~ ^\- ]]; then
+	$command --help | egrep "\\$arg[^a-zA-Z]"
 else
 	$command --help | grep "$arg"
 fi
