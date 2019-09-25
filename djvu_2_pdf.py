@@ -15,7 +15,7 @@ djvu2pdf = djvu.replace('.djvu', '.pdf')
 ocr_pdf = djvu2pdf.replace('.pdf', '.ocr.pdf')
 
 # Use ddjvu to convert djvu to pdf
-os.system('ddjvu -format=pdf -quality=85 -verbose {} {}'.format(djvu, djvu2pdf))
+os.system('ddjvu -format=pdf -quality=150 -verbose {} {}'.format(djvu, djvu2pdf))
 
 print('Start ocr pdf...')
 # Use ocrmypdf to ocr pdf
