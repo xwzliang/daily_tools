@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+# Download playlist using youtube-dl
+
+url_playlist="$1"
+# Parallelism can be already be delegated to xargs -P x -n y where x is the number of parallel downloads and y is the number of URLs/IDs to pass to youtube-dl, most likely 1. 
+youtube-dl -j --flat-playlist "$url_playlist" | jq -r '"https://youtu.be/"+ .url' | xargs -n 1 -P 6 youtube-dl -ciw --all-subs
