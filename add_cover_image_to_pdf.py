@@ -16,6 +16,11 @@ pdf = rm_invalid_chars(sys.argv[2])
 cover_pdf = cover_image.split('.')[0] + '_cover.pdf'
 out_pdf = pdf.replace('.pdf', '_final.pdf')
 
+# Remove ImageMagick restriction policy file if existed
+policy_file = "/etc/ImageMagick-6/policy.xml"
+if os.path.exists(policy_file):
+	os.rename(policy_file, policy_file+"out")
+
 # Use convert to convert image to pdf
 os.system('convert {} {}'.format(cover_image, cover_pdf))
 
