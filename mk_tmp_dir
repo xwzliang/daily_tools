@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+# Make tmp dir at current directory
+rm -rf tmp
+mkdir tmp
+# If cd effect is needed, source this script instead of calling it
+cd tmp
