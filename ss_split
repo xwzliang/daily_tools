@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+# Split a ss json config to seperate configs for ss-local
+json_path="$1"
+json_dir=$(dirname $1)
+file_names=$(jq '.configs[].server' < $json_path | tr -d '"')
+file_num=$(wc -w <<<$file_names)
+jq '.configs[]' < $json_path | csplit -s -k - '%^{%' '/^{/' "{$(( $file_num-2 ))}"
+i=0
+while read file_name; do
+	if [ $i -lt 10 ]; then
+		mv xx0$i $json_dir/$file_name
+	else
+		mv xx$i $json_dir/$file_name
+	fi
+	i=$(( $i + 1 ))
+done <<< $file_names
