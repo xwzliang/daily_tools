@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+# View the contents of a magnet URL
+magnet_url="$1"
+
+hash=$(echo "$magnet_url" | sed -nE 's/(.*btih:)(.*)(&.*)?/\2/p')
+echo "Magnet hash: $hash"
+aria2c --bt-metadata-only=true --bt-save-metadata=true -q "$magnet_url"
+aria2c "$hash.torrent" -S
