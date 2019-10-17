@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+# Add or update tracker list for aria2.conf
+aria2_conf=$HOME/git/dotfiles/aria2_symlink_aria2.conf
+# Delete tracker list in aria2.conf if existed
+sed -i '/^bt-tracker=/d' $aria2_conf
+# Add new tracker list
+wget -qO - https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_all.txt | sed '/^$/d' | paste -sd "," | awk '{ print "bt-tracker="$0  }' >> $aria2_conf
