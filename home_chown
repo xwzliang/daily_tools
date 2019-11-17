@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# chown for all in home dir to user
+user=$(who am i | awk {'print $1'})
+sudo chown -R $user:$user $HOME
