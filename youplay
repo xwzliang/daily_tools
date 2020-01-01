@@ -2,6 +2,10 @@
 
 # Download playlist using youtube-dl
 
+# Use socks5 proxy
+export https_proxy=socks5://127.0.0.1:1080
+export http_proxy=socks5://127.0.0.1:1080
+
 url_playlist="$1"
 # Parallelism can be already be delegated to xargs -P x -n y where x is the number of parallel downloads and y is the number of URLs/IDs to pass to youtube-dl, most likely 1. 
 n=0
