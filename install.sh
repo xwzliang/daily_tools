@@ -2,7 +2,7 @@
 
 dir="$(dirname $(realpath "$0"))"
 my_bin_dir=$HOME/bin
-mkdir -p $my_bin_dir
+install -d $my_bin_dir
 
 scripts=$(ls $dir | grep -v $0 | grep -v README)
 
