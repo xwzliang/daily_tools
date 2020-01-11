@@ -4,9 +4,10 @@
 
 command=$1
 arg=$2
+context_num=${3:-0}
 
 if [[ "$2" =~ ^\- ]]; then
-	$command --help | egrep "\\$arg[^a-zA-Z]"
+	$command --help | egrep -C $context_num "\\$arg[^a-zA-Z]"
 else
-	$command --help | grep "$arg"
+	$command --help | grep -C $context_num "$arg"
 fi
