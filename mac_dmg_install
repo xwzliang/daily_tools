@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+# Install dmg application for MacOS.
+
+VOLUME=`hdiutil attach "$1" | grep Volumes | awk '{print $3}'`
+echo "Copying from $VOLUME."
+cp -rf $VOLUME/*.app /Applications
+hdiutil detach "$VOLUME"
+echo "Done."
