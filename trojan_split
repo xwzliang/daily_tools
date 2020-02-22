@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# Split a shadowrocket exported json config for trojan
+shadowrocket_json_path="$1"
+template_json_path="$2"
+json_dir=$(dirname $1)
+file_names=$(jq '.[].host' < $shadowrocket_json_path | tr -d '"')
+
+while read file_name; do
+	jq ".remote_addr = \"$file_name\"" $template_json_path > $file_name
+done <<< $file_names
