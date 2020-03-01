@@ -31,7 +31,7 @@ if __name__ == '__main__':
             params = sys.argv[2:]
             arg_dict = dict(arg.split('=') for arg in sys.argv[2:])
             for key, value in arg_dict.items():
-                if key == "decks":
+                if key in ["decks", "notes", "cards"]:
                     arg_dict[key] = value.split(" ")
             results = invoke(action, **arg_dict)
         else:
