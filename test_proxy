@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+unset_proxy
+
+if [[ "$(uname)" == "Darwin" ]]; then
+	proxy_cmd=proxychains4
+else
+	proxy_cmd=proxychains
+fi
+if timeout 5 $proxy_cmd curl www.google.com &>/dev/null; then
+	echo proxy ok.
+else
+	echo proxy not ok.
+fi
