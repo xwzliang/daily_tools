@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+unset ALL_PROXY all_proxy http_proxy https_proxy
+
+echo "Proxy unset"
