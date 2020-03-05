@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+# Print the newest file or directory
+ls -dt "$@" | head -1
