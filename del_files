@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+# if files to delete are less than three, ask me to confirm for each one of them; if they are more than three, display them all and ask once
+case $# in
+0)	echo "`basename $0`: you didn't say which file(s) to delete"; exit 1;;
+[123])	rm -i "$@" ;;
+*)	echo "$*"
+	echo do you want to delete these files\?
+	read a
+	case "$a" in
+	[yY]*)	rm "$@" ;;
+	esac
+	;;
+esac
+
