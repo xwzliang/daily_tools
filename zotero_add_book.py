@@ -223,8 +223,8 @@ def main():
 
 if __name__ == '__main__':
     os.environ["https_proxy"] = "https://127.0.0.1:8118"
-    amazon_book_html_file_path = "~/tmp/amazon_book.html"
-    linked_url_file_path = "~/tmp/linked_url"
+    amazon_book_html_file_path = "~/pipes/zotero/amazon_book.html"
+    linked_url_file_path = "~/pipes/zotero/linked_url"
     book_dir = "~/Downloads/books"
     dropbox_zotero_storage_dir = "~/Dropbox/ZoteroStorage"
     zotero_api_key_file_path = "~/Dropbox/keys/zotero/api"
