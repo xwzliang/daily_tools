@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+# View the images of first 10 pages of pdf in terminal using tiv
+
+img_dir=~/pipes/pdf_img
+
+rm $img_dir/*
+
+pdftoppm "$1" -jpeg -f 1 -l 10 -rx 500 -ry 500 $img_dir/img
+
+ls $img_dir | xargs -n 1 tiv
+
+tiv $img_dir/*.jpg
