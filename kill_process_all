@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+process_name=${1:-mosh-server}
+
+script_name=$(basename $0)
+
+ps aux | grep $process_name | grep -v grep | grep -v $script_name | awk '{ print $2 }' | xargs kill -2 2>/dev/null || echo $process_name isn\'t running.
