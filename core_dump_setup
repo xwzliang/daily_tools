@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# Source this file to take effects
+
+ulimit -c unlimited
+
+if [[ "$(uname)" == "Darwin" ]]; then
+	echo "core dump file location is in /cores"
+else
+	sudo echo "core.%e.%p" > /proc/sys/kernel/core_pattern 
+fi
