@@ -35,6 +35,9 @@ def extract_book_info(decode_html):
     elif "Amazon.com" in meta_item[-1]:
         book_name = re.findall('<span id="productTitle" class="a-size-extra-large">(.*)</span>', decode_html, flags=re.MULTILINE)[0]
         author_name = re.findall('<div class="a-row">\n.*<span class="a-size-medium">(.*)\n.*\n.*<span class="a-color-secondary">\(Author\)</span>', decode_html, flags=re.MULTILINE)[0]
+        # TODO
+        # If there are other authors, they are in
+        # span class="author notFaded"
     else:
         book_name = ": ".join(meta_item[0:-4])
         author_name = meta_item[-4]
