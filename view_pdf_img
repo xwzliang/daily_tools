@@ -8,6 +8,8 @@ rm $img_dir/*
 
 pdftoppm "$1" -jpeg -f 1 -l 10 -rx 500 -ry 500 $img_dir/img
 
-ls $img_dir | xargs -n 1 tiv
+for img_file in $img_dir/*.jpg; do
+	tiv $img_file
+done
 
 tiv $img_dir/*.jpg
