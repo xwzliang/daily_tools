@@ -1,3 +1,10 @@
 #!/usr/bin/env bash
 
-rename 's/[^A-Za-z0-9._-]/_/g' "$1"
+result=$(rename -v -d 's/[^A-Za-z0-9._-]/_/g' "$1")
+
+if [[ $result == '' ]]; then
+	# No need to rename
+	echo "$1"
+else
+	sed -En 's/.*renamed as (.*)$/\1/p' <<< "$result"
+fi
