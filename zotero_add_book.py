@@ -170,7 +170,7 @@ def set_pdf_name(book_info):
     return pdf_name
     
 def copy_pdf_to_dropbox(pdf_name):
-    pdf_path = os.popen("newest {}/*.pdf".format(book_dir)).read().strip()
+    pdf_path = os.popen('rm_invalid_chars "`newest {}/*.pdf`"'.format(book_dir)).read().strip()
     target_pdf_path = "{}/{}".format(dropbox_zotero_storage_dir, pdf_name.replace(" ", "\\ "))
     os.system("cp '{}' {}".format(pdf_path, target_pdf_path))
     
