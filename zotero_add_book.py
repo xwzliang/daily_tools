@@ -237,3 +237,6 @@ if __name__ == '__main__':
     zotero_api_key_file_path = "~/Dropbox/keys/zotero/api"
     zotero_collections_file_path = "~/Dropbox/keys/zotero/collections"
     main()
+
+# Usage exp:
+# zotero_add_book.py Health_Strength_Sports "1,2"
