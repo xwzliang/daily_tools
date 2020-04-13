@@ -42,8 +42,11 @@ def extract_book_info(decode_html):
         book_name = ": ".join(meta_item[0:-4])
         author_name = meta_item[-4]
 
-    book_isbn = re.findall('<li><b>ISBN-13:</b> (.*)</li>', decode_html)[0]
-    numPages = re.findall('<li><b>(?:Hardcover|Paperback):</b> ([0-9]+) pages</li>', decode_html)[0]
+    if re.findall('<li><b>ISBN-13:</b> (.*)</li>', decode_html):
+        book_isbn = re.findall('<li><b>ISBN-13:</b> (.*)</li>', decode_html)[0]
+        numPages = re.findall('<li><b>(?:Hardcover|Paperback):</b> ([0-9]+) pages</li>', decode_html)[0]
+        book_info["numPages"] = numPages
+        book_info["ISBN"] = book_isbn
 
     publisher_and_date = re.findall('<li><b>Publisher:</b> (.*)</li>', decode_html)[0]
     publisher = publisher_and_date.split("(")[0].strip()
@@ -55,16 +58,11 @@ def extract_book_info(decode_html):
     publish_date = publisher_and_date.split("(")[1].replace(")", "")
     publish_year = publish_date.split(" ")[-1]
 
-    img_src = re.findall('class="a-dynamic-image.*id="imgBlkFront".* data-a-dynamic-image="{&quot;https://images-na.ssl-images-amazon.com/images/.*&quot;.*&quot;(https://images-na.ssl-images-amazon.com/images/.*)&quot;', decode_html)[0]
-    print(img_src)
-
     book_info["title"] = book_name
     if ":" in book_name:
         shortTitle = meta_item[0]
         book_info["shortTitle"] = shortTitle
     book_info["author_name_parts"] = parse_person_name(author_name)
-    book_info["numPages"] = numPages
-    book_info["ISBN"] = book_isbn
     book_info["libraryCatalog"] = "Amazon"
     book_info["date"] = publish_date
     book_info["publish_year"] = publish_year
