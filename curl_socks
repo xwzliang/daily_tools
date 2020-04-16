@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+socks_proxy=socks5h://127.0.0.1:1080
+
+curl -x $socks_proxy "$@"
