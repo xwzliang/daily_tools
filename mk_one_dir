@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# Make one dir from arguments, replace invalid chars with "_"
+
+mkdir $(repl_invalid_chars "$@")

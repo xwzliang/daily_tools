@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# Replace invalid chars in arguments (not suitable for filename or dirname) and print
+
+sed -E 's/[^A-Za-z0-9._-]/_/g' <<< "$@"
