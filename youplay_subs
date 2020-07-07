@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Download playlist using youtube-dl
+# Download subs in playlist using youtube-dl, skip videos
 
 # Use socks5 proxy
 export https_proxy=socks5://127.0.0.1:1080
@@ -11,7 +11,7 @@ url_playlist="$1"
 n=0
 until [ $n -ge 10 ]
 do
-	youtube-dl -j --flat-playlist "$url_playlist" | jq -r '"https://youtu.be/"+ .url' | xargs -n 1 -P 6 youtube-dl -ciw --write-sub --write-auto-sub && break
+	youtube-dl -j --flat-playlist "$url_playlist" | jq -r '"https://youtu.be/"+ .url' | xargs -n 1 -P 6 youtube-dl -ciw --write-sub --write-auto-sub --skip-download && break
 	n=$((n+1))
 	sleep 15
 done
