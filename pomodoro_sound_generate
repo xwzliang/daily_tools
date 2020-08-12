@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+# Generate audio for the Pomodoro Technique (with ticking and alarm sound)
+
+# Mono channel audio
+# ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 5 -q:a 9 -acodec libmp3lame silent5s.mp3
+
+# stereo audio
+# 5 seconds silence between ticks
+ffmpeg -f lavfi -i anullsrc=r=44100 -t 5 -q:a 9 -acodec libmp3lame silent5s.mp3
+# 5 minute silence for short break time
+ffmpeg -f lavfi -i anullsrc=r=44100 -t 300 -q:a 9 -acodec libmp3lame silent5min.mp3
+# 25 minute silence for long break time
+ffmpeg -f lavfi -i anullsrc=r=44100 -t $((25*60)) -q:a 9 -acodec libmp3lame silent25min.mp3
+
+tick_sound="~/Dropbox/Sounds/Alert/tick.wav"
+# Concatnate tick_sound with silence
+sox $tick_sound silent5s.mp3 tick_with_silence.mp3
+
+# Generate 25 minute ticking sound
+
+# subtract some time to make it 25 minute
+repeat_times=$((25 * 60 / 5 - 85 / 5))
+sox tick_with_silence.mp3 ticking25min.mp3 repeat $repeat_times
+
+# Concatnate finished Pomodoro alarm sound, short break silence and break finished sound
+pomo_finished_sound="~/Dropbox/Sounds/Alert/Little_Crystal.mp3"
+break_finished_sound="~/Dropbox/Sounds/Alert/Sunny_Day.mp3"
+
+sox ticking25min.mp3 $pomo_finished_sound silent5min.mp3 $break_finished_sound short_break_pomodoro.mp3
+sox ticking25min.mp3 $pomo_finished_sound silent25min.mp3 $break_finished_sound long_break_pomodoro.mp3
+# A set of pomodoros (4 session)
+sox short_break_pomodoro.mp3 3short_break_pomodoro.mp3 repeat 2
+sox 3short_break_pomodoro.mp3 long_break_pomodoro.mp3 full_set_promodoro.mp3
+
+rm silent*.mp3
+rm tick*.mp3
+rm 3short_break_pomodoro.mp3
