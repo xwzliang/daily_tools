@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+# Send a notification to all devices using IFTTT.
+
+message=$0
+# payload=$(echo {"value1":"$1"})
+payload='{"value1":"'"$1"'"}'
+
+# curl -X POST -H "Content-Type: application/json" -d '{"value1":"test test"}' https://maker.ifttt.com/trigger/from_script/with/key/b5FSwcmXbu2cR0LhUrXQMx
+curl -s -o /dev/null -X POST -H "Content-Type: application/json" -d "$payload" https://maker.ifttt.com/trigger/from_script/with/key/b5FSwcmXbu2cR0LhUrXQMx
