@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+# Return 24H percentage change of a crypto currency
+
+coin_symbol=$1
+
+get_coinmon_output(){
+    coinmon -f "$coin_symbol" 2>/dev/null | sed -n '7 p' | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | sed -r "s/│/|/g" | cut -d '|' -f 5 | xargs | sed "s/%//"
+}
+
+re_for_float_number='^[+-]?[0-9]+([.][0-9]+)?$'
+
+times_to_try=10
+
+n=0
+until [ $n -ge $times_to_try ]
+do
+    output=$(get_coinmon_output)
+
+    if ! [[ $output =~ $re_for_float_number ]] ; then
+        n=$((n+1))
+        sleep 2
+    else
+        echo "$output"
+        break
+    fi
+done
+
+if [ $n -ge $times_to_try ]; then
+    exit 1
+fi
