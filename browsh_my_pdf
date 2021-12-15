@@ -7,4 +7,4 @@ pdftohtml_dir=$HOME/pipes/pdftohtml
 
 pdftohtml -noframes -nomerge -s -c -q -zoom 2.1 -wbt 10000 -enc UTF-8 "$pdf_file" $pdftohtml_dir/1.html
 
-caddy file-server --root ~ --listen :2015 & browsh http://localhost:2015/pipes/pdftohtml/1.html
+caddy file-server --root ~ --listen :2015 & browsh --firefox.with-gui --startup-url http://localhost:2015/pipes/pdftohtml/1.html
