@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# Download music using yun-playlist-downloader
+
+yun -p false "$1"
