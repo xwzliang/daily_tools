@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # Download video file using youtube-dl
+# Prefer mp4 format for better compatibility with various ios app
 
 # Use socks5 proxy
 export https_proxy=socks5://127.0.0.1:1080
@@ -11,7 +12,7 @@ url_file="$1"
 n=0
 until [ $n -ge 10 ]
 do
-	youtube-dl -ciw --write-sub --write-auto-sub "$url_file" && break
+	youtube-dl -ciw --write-sub --write-auto-sub --format "bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best" "$url_file" && break
 	n=$((n+1))
 	sleep 15
 done
