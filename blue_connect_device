@@ -1,0 +1,41 @@
+#!/usr/bin/expect -f
+
+set address [lindex $argv 0]
+set pw [lindex $argv 1]
+set prompt "#"
+
+# Whether to have logs ouput
+# log_user 0
+log_user 1
+
+spawn sudo bluetoothctl
+expect "\[sudo\] password for broliang: "
+
+send "$pw\r"
+expect "$prompt "
+
+# send -- "remove $address\r"
+# expect $prompt
+
+# send -- "scan on\r"
+# expect "Discovery started"
+# sleep 10
+# send -- "scan off\r"
+# expect "Discovery stopped"
+# expect $prompt
+
+# send -- "trust $address\r"
+# expect "trust succeeded"
+# expect $prompt
+
+# send -- "pair $address\r"
+# expect "Pairing successful"
+# expect "Device $address Connected: no"
+# expect $prompt
+
+send -- "connect $address\r"
+expect "Connection successful"
+expect $prompt
+
+send "quit\r"
+expect "eof"
