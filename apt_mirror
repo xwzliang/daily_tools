@@ -3,4 +3,4 @@
 # regions like cn or us
 region="$1"
 
-sudo sed -E -i "s#http://[^\s]*archive\.ubuntu\.com/ubuntu#http://us.archive.ubuntu.com/ubuntu#g" /etc/apt/sources.list
+sudo sed -E -i "s#http://[^[:space:]]*archive\.ubuntu\.com/ubuntu#http://$region.archive.ubuntu.com/ubuntu#g" /etc/apt/sources.list
