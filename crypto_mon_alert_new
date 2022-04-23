@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+
+coin_symbol=$1
+
+level=0
+new_level=0
+
+notify_on_change() {
+    if [ $level -ne $new_level ]; then
+        echo "$(date +"%Y-%m-%dT%H:%M:%S%z") Newmon $coin_symbol $1 more than $2% in 24h! It changes $price_percentage_change%"
+        notify_me "$(date +"%Y-%m-%dT%H:%M:%S%z") Newmon $coin_symbol $1 more than $2% in 24h! It changes $price_percentage_change%"
+        level=$new_level
+    fi
+}
+
+get_price_and_alert() {
+    price_percentage_change=$(my_coinmon $coin_symbol)
+
+    X=$price_percentage_change
+
+    if (( $(echo "$X<=-50" | bc -l) ))
+    then
+        new_level=-50
+        notify_on_change decreases 50
+    elif (( $(echo "-50<$X && $X<=-40" | bc -l) ))
+    then
+        new_level=-40
+        notify_on_change decreases 40
+    elif (( $(echo "-40<$X && $X<=-30" | bc -l) ))
+    then
+        new_level=-30
+        notify_on_change decreases 30
+    elif (( $(echo "-30<$X && $X<=-20" | bc -l) ))
+    then
+        new_level=-20
+        notify_on_change decreases 20
+    elif (( $(echo "-20<$X && $X<=-10" | bc -l) ))
+    then
+        new_level=-10
+        notify_on_change decreases 10
+    elif (( $(echo "10<=$X && $X<20" | bc -l) ))
+    then
+        new_level=10
+        notify_on_change increases 10
+    elif (( $(echo "20<=$X && $X<30" | bc -l) ))
+    then
+        new_level=20
+        notify_on_change increases 20
+    elif (( $(echo "30<=$X && $X<40" | bc -l) ))
+    then
+        new_level=30
+        notify_on_change increases 30
+    elif (( $(echo "40<=$X && $X<50" | bc -l) ))
+    then
+        new_level=40
+        notify_on_change increases 40
+    elif (( $(echo "50<=$X" | bc -l) ))
+    then
+        new_level=50
+        notify_on_change increases 50
+    else
+        new_level=0
+        level=0
+    fi
+}
+
+while true
+do
+    get_price_and_alert
+    # run every 20 minutes
+    sleep 1200
+done
