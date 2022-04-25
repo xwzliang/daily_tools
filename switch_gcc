@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+sudo apt -y install gcc-$1 g++-$1
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-$1 $1
+sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-$1 $1
+
+sudo update-alternatives --config gcc
