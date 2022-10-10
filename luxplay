@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# can download bilibili, weibo and a lot of other sources
+
+# lux options
+  # --start int
+  #   	Playlist video to start at (default 1)
+  # --end int
+  #   	Playlist video to end at
+  # --items string
+  #   	Playlist video items to download. Separated by commas like: 1,5,6,8-10
+
+# For bilibili playlists only:
+
+# -eto
+#   File name of each bilibili episode doesn't include the playlist title
+
+url_playlist="$1"
+
+lux -p $url_playlist
