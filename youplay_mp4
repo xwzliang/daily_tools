@@ -8,11 +8,13 @@
 # export http_proxy=socks5://127.0.0.1:1080
 
 url_playlist="$1"
-# Parallelism can be already be delegated to xargs -P x -n y where x is the number of parallel downloads and y is the number of URLs/IDs to pass to youtube-dl, most likely 1. 
-n=0
-until [ $n -ge 10 ]
-do
-	youtube-dl -j --flat-playlist "$url_playlist" | jq -r '"https://youtu.be/"+ .url' | xargs -n 1 -P 6 youtube-dl -ciw --write-sub --write-auto-sub --format "bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4 && break
-	n=$((n+1))
-	sleep 15
-done
+# # Parallelism can be already be delegated to xargs -P x -n y where x is the number of parallel downloads and y is the number of URLs/IDs to pass to youtube-dl, most likely 1. 
+# n=0
+# until [ $n -ge 10 ]
+# do
+# 	youtube-dl -j --flat-playlist "$url_playlist" | jq -r '"https://youtu.be/"+ .url' | xargs -n 1 -P 6 youtube-dl -ciw --write-sub --write-auto-sub --format "bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4 && break
+# 	n=$((n+1))
+# 	sleep 15
+# done
+
+youplay $url_playlist && to_mp4 mkv
