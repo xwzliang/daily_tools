@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+app_name="$1"
+
+open -n /Applications/"$1".app --args -AppCommandLineArg

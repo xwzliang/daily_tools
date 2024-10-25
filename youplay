@@ -12,7 +12,8 @@ url_playlist="$1"
 n=0
 until [ $n -ge 10 ]
 do
-	youtube-dl -j --flat-playlist "$url_playlist" | jq -r '"https://youtu.be/"+ .url' | xargs -n 1 -P 6 youtube-dl -ciw --write-sub --write-auto-sub --format "bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best" && break
+	# youtube-dl -j --flat-playlist "$url_playlist" | jq -r '"https://youtu.be/"+ .url' | xargs -n 1 -P 6 youtube-dl -ciw --write-sub --write-auto-sub --format "bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best" && break
+	yt-dlp -j --flat-playlist "$url_playlist" | jq -r '"https://youtu.be/"+ .url' | xargs -n 1 -P 6 yt-dlp -ciw --write-sub --write-auto-sub --format "bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best" && break
 	n=$((n+1))
 	sleep 15
 done
