@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+
+# Lists GPU VRAM users and maps PIDs to container names (Docker/containerd/k8s where possible)
+# Works on GNU, BusyBox, and macOS sed-less environments.
+
+set -euo pipefail
+
+# Collect processes using the GPU
+# Fallback to plain nvidia-smi if query option not supported
+if nvidia-smi --help-query-gpu >/dev/null 2>&1; then
+  MAP_CMD="nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits"
+else
+  MAP_CMD="nvidia-smi | awk '/Processes/ {flag=1;next} flag && NF>0 {print}' | awk '{print \$5\",\"\$2\",\"\$6}'"
+fi
+
+# Helper: extract a container ID (64 hex) from /proc/<pid>/cgroup
+extract_cid() {
+  local pid="$1"
+  local cg
+  cg="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
+
+  # Docker cgroup v1: .../docker/<64>...
+  grep -oE '/docker/[0-9a-f]{64}' <<<"$cg" | head -n1 | grep -oE '[0-9a-f]{64}' && return 0
+  # Docker cgroup v2 (systemd): docker-<64>.scope
+  grep -oE 'docker-[0-9a-f]{64}\.scope' <<<"$cg" | head -n1 | grep -oE '[0-9a-f]{64}' && return 0
+  # containerd k8s path
+  grep -oE 'containerd.*/k8s\.io/[0-9a-f]{64}' <<<"$cg" | grep -oE '[0-9a-f]{64}' | head -n1 && return 0
+  # kubepods legacy
+  grep -oE 'kubepods[^ ]*/[0-9a-f]{64}' <<<"$cg" | grep -oE '[0-9a-f]{64}' | head -n1 && return 0
+
+  # Nothing found
+  return 1
+}
+
+# Helper: resolve a container ID to a human name
+resolve_name() {
+  local cid="$1"
+  local cid12="${cid:0:12}"
+  local name=""
+
+  # Try Docker
+  if command -v docker >/dev/null 2>&1; then
+    name="$(docker ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null | awk -v id="$cid12" '$1 ~ id {print $2}')"
+    [ -n "$name" ] && { echo "$name"; return; }
+  fi
+
+  # Try containerd / crictl (Kubernetes)
+  if command -v crictl >/dev/null 2>&1; then
+    # Pod name if available
+    local pod
+    pod="$(crictl ps --id "$cid" 2>/dev/null | awk 'NR==2{print $5":"$6}')" || true
+    [ -n "$pod" ] && { echo "$pod"; return; }
+  fi
+
+  echo ""
+}
+
+# Print header
+printf "%-9s %-8s %-22s %-14s %s\n" "VRAM(MiB)" "PID" "PROCESS" "CONTAINER_ID" "NAME"
+
+# Iterate over GPU processes
+$MAP_CMD 2>/dev/null | while IFS=, read -r pid proc mem; do
+  pid="$(echo "${pid:-}" | xargs)"
+  proc="$(echo "${proc:-}" | xargs)"
+  mem="$(echo "${mem:-}" | xargs)"
+
+  [ -z "$pid" ] && continue
+  [ ! -r "/proc/$pid/cgroup" ] && continue
+
+  cid="$(extract_cid "$pid" || true)"
+  cid12="${cid:0:12}"
+  name=""
+  if [ -n "$cid" ]; then
+    name="$(resolve_name "$cid")"
+  fi
+  [ -z "$name" ] && name="host"
+
+  printf "%-9s %-8s %-22s %-14s %s\n" "${mem:-?}" "$pid" "${proc:-?}" "${cid12:--}" "$name"
+done
