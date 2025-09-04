@@ -1,0 +1,23 @@
+#!/bin/bash
+# •	Make an API key in Dashboard → API keys.
+# •	Grab your user ID (e.g., from the web devtools network calls or /Users).
+# •	Find the series ID (open the show in the web client; the URL has ?id=<seriesId>).
+JELLYFIN_URL="http://imac.local:8096"
+TOKEN="8ff4ba42ecee43a5a1f804dfd692783b"
+USER_ID="96314c178beb4d41a1b5bf251bcf6fff"
+SERIES_ID="d35fae21808fddbcf6821f34145070d2"
+SEASON=1          # season number to target
+START_EP=1        # first episode in the range
+END_EP=582         # last episode in the range
+# ------------------
+
+HDR='Authorization: MediaBrowser Client="BulkMark", Device="script", DeviceId="bulk1", Version="1.0", Token='"$TOKEN"''
+
+# Get episode IDs for the season, then mark the ones in [START_EP, END_EP] as played
+curl -s -H "$HDR" \
+  "$JELLYFIN_URL/Shows/$SERIES_ID/Episodes?season=$SEASON&fields=Id,IndexNumber&enableUserData=true" \
+| jq -r ".Items[] | select(.IndexNumber >= $START_EP and .IndexNumber <= $END_EP) | .Id" \
+| while read -r EP_ID; do
+    curl -s -X POST -H "$HDR" "$JELLYFIN_URL/Users/$USER_ID/PlayedItems/$EP_ID" >/dev/null
+    echo "Marked $EP_ID as played"
+  done
