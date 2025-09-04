@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+new_location="$1"
+
+mv ~/Library/Application\ Support/MobileSync/Backup ~/Library/Application\ Support/MobileSync/Backup_old
+
+ln -s $new_location ~/Library/Application\ Support/MobileSync/Backup

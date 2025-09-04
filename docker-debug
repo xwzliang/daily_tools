@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "Usage: $0 [docker run options] IMAGE" >&2
+  exit 1
+fi
+
+# The image is the last argument;
+# everything else (flags, -d, --name, -v, etc.) go into opts
+image="${!#}"
+opts=("${@:1:$#-1}")
+
+docker run \
+  "${opts[@]}" \
+  --entrypoint bash \
+  "$image" \
+  -c "true; echo 'keeping container alive for debugging'; tail -f /dev/null"
