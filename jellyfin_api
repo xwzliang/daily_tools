@@ -19,10 +19,10 @@ log() { [[ "$VERBOSE" -eq 1 ]] && echo "[INFO] $*"; }
 usage() {
   cat <<'EOF'
 Bulk mark a range of Jellyfin episodes as watched (or unwatch them).
-•   Jellyfin api docs: http://imac.local:8096/api-docs/swagger/index.html
-•	Make an API key in Dashboard → API keys.
-•	Grab your user ID (e.g., from the web devtools network calls or /Users).
-•	Find the series ID (open the show in the web client; the URL has ?id=<seriesId>).
+•  Jellyfin api docs: http://imac.local:8096/api-docs/swagger/index.html
+•  Make an API key in Dashboard → API keys.
+•  Grab your user ID (e.g., from the web devtools network calls or /Users).
+•  Find the series ID (open the show in the web client; the URL has ?id=<seriesId>).
 USAGE:
   jellyfin_api --series SERIES_ID --season N --start A --end B [options]
 
