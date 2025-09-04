@@ -1,23 +1,126 @@
-#!/bin/bash
-# •	Make an API key in Dashboard → API keys.
-# •	Grab your user ID (e.g., from the web devtools network calls or /Users).
-# •	Find the series ID (open the show in the web client; the URL has ?id=<seriesId>).
-JELLYFIN_URL="http://imac.local:8096"
-TOKEN="8ff4ba42ecee43a5a1f804dfd692783b"
-USER_ID="96314c178beb4d41a1b5bf251bcf6fff"
-SERIES_ID="d35fae21808fddbcf6821f34145070d2"
-SEASON=1          # season number to target
-START_EP=1        # first episode in the range
-END_EP=582         # last episode in the range
-# ------------------
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Defaults (can also be overridden via flags)
+JELLYFIN_URL="${JELLYFIN_URL:-http://imac.local:8096}"
+TOKEN="${JELLYFIN_TOKEN:-8ff4ba42ecee43a5a1f804dfd692783b}"      # or pass via --token
+USER_ID="${JELLYFIN_USER_ID:-96314c178beb4d41a1b5bf251bcf6fff}"  # or pass via --user
+
+SERIES_ID=""
+SEASON="1"
+START_EP="1"
+END_EP=""
+UNWATCH=0
+DRYRUN=0
+VERBOSE=1
+
+log() { [[ "$VERBOSE" -eq 1 ]] && echo "[INFO] $*"; }
+
+usage() {
+  cat <<'EOF'
+Bulk mark a range of Jellyfin episodes as watched (or unwatch them).
+•   Jellyfin api docs: http://imac.local:8096/api-docs/swagger/index.html
+•	Make an API key in Dashboard → API keys.
+•	Grab your user ID (e.g., from the web devtools network calls or /Users).
+•	Find the series ID (open the show in the web client; the URL has ?id=<seriesId>).
+USAGE:
+  jellyfin_api --series SERIES_ID --season N --start A --end B [options]
+
+REQUIRED:
+  --series, -s   SERIES_ID (e.g., d35fae21808fddbcf6821f34145070d2)
+  --season, -n   Season number (integer)
+  --start,  -a   Starting episode index number (integer)
+  --end,    -b   Ending episode index number (integer)
+
+OPTIONS:
+  --url,    -u   Jellyfin base URL (default: $JELLYFIN_URL)
+  --token,  -t   Jellyfin access token (defaults to \$JELLYFIN_TOKEN)
+  --user,   -U   Target USER_ID (defaults to \$JELLYFIN_USER_ID)
+  --unwatch      Unmark (DELETE) instead of mark watched (POST)
+  --dry-run      Show which episode IDs would be changed, but don't call API
+  --verbose, -v  Verbose logs
+  --help,   -h   Show this help
+
+ENV OVERRIDES:
+  JELLYFIN_URL, JELLYFIN_TOKEN, JELLYFIN_USER_ID
+
+EXAMPLES:
+  Mark E1–E50 of S1 watched:
+    jellyfin_api -s d35f...70d2 -n 1 -a 1 -b 50 -t <TOKEN> -U <USER_ID>
+
+  Unwatch a single episode:
+    jellyfin_api -s d35f...70d2 -n 1 -a 582 -b 582 --unwatch -t <TOKEN> -U <USER_ID>
+EOF
+}
+
+# --- Parse args ---
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -s|--series) SERIES_ID="${2:-}"; shift 2;;
+    -n|--season) SEASON="${2:-}"; shift 2;;
+    -a|--start)  START_EP="${2:-}"; shift 2;;
+    -b|--end)    END_EP="${2:-}"; shift 2;;
+    -u|--url)    JELLYFIN_URL="${2:-}"; shift 2;;
+    -t|--token)  TOKEN="${2:-}"; shift 2;;
+    -U|--user)   USER_ID="${2:-}"; shift 2;;
+    --unwatch)   UNWATCH=1; shift;;
+    --dry-run)   DRYRUN=1; shift;;
+    -v|--verbose) VERBOSE=1; shift;;
+    -h|--help) usage; exit 0;;
+    *) echo "Unknown option: $1"; usage; exit 1;;
+  esac
+done
+
+# --- Checks ---
+if ! command -v jq >/dev/null 2>&1; then
+  echo "Error: 'jq' is required." >&2; exit 1
+fi
+
+for var in SERIES_ID SEASON START_EP END_EP JELLYFIN_URL TOKEN USER_ID; do
+  if [[ -z "${!var:-}" ]]; then
+    echo "Error: $var is required." >&2; usage; exit 1
+  fi
+done
+
+if [[ "$START_EP" -gt "$END_EP" ]]; then
+  echo "Error: --start must be <= --end" >&2; exit 1
+fi
 
 HDR='Authorization: MediaBrowser Client="BulkMark", Device="script", DeviceId="bulk1", Version="1.0", Token='"$TOKEN"''
 
-# Get episode IDs for the season, then mark the ones in [START_EP, END_EP] as played
-curl -s -H "$HDR" \
-  "$JELLYFIN_URL/Shows/$SERIES_ID/Episodes?season=$SEASON&fields=Id,IndexNumber&enableUserData=true" \
-| jq -r ".Items[] | select(.IndexNumber >= $START_EP and .IndexNumber <= $END_EP) | .Id" \
-| while read -r EP_ID; do
-    curl -s -X POST -H "$HDR" "$JELLYFIN_URL/Users/$USER_ID/PlayedItems/$EP_ID" >/dev/null
-    echo "Marked $EP_ID as played"
-  done
+log "URL: $JELLYFIN_URL"
+log "Series: $SERIES_ID | Season: $SEASON | Range: $START_EP..$END_EP"
+log "User: $USER_ID | Mode: $([[ $UNWATCH -eq 1 ]] && echo UNWATCH || echo WATCH)"
+
+# --- Fetch episodes for the season, filter by range ---
+EP_IDS=$(
+  curl -fsS -H "$HDR" \
+    "$JELLYFIN_URL/Shows/$SERIES_ID/Episodes?season=$SEASON&fields=Id,IndexNumber&enableUserData=true" \
+  | jq -r ".Items[] | select(.IndexNumber >= $START_EP and .IndexNumber <= $END_EP) | .Id"
+)
+
+if [[ -z "$EP_IDS" ]]; then
+  echo "No episodes found in that range. Check series/season and index numbers." >&2
+  exit 1
+fi
+
+COUNT=0
+while IFS= read -r EP_ID; do
+  [[ -z "$EP_ID" ]] && continue
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "(dry-run) Would $([[ $UNWATCH -eq 1 ]] && echo UNWATCH || echo WATCH) $EP_ID"
+  else
+    if [[ "$UNWATCH" -eq 1 ]]; then
+      curl -fsS -X DELETE -H "$HDR" \
+        "$JELLYFIN_URL/Users/$USER_ID/PlayedItems/$EP_ID" >/dev/null
+      echo "Unwatched $EP_ID"
+    else
+      curl -fsS -X POST -H "$HDR" \
+        "$JELLYFIN_URL/Users/$USER_ID/PlayedItems/$EP_ID" >/dev/null
+      echo "Marked $EP_ID as played"
+    fi
+  fi
+  COUNT=$((COUNT+1))
+done <<< "$EP_IDS"
+
+log "Done. Affected episodes: $COUNT"
