@@ -4,11 +4,11 @@ MP3="/Users/broliang/Music/sleep_meditation.mp3"
 END_HOUR=7  # Stop at 07:00
 
 while true; do
-    HOUR=$(date +%H)
+    HOUR=$(date +%H)          # e.g. "09"
+    HOUR_DEC=$((10#$HOUR))    # forces base 10, so "09" → 9
 
     # Stop only when hour >= 7 AND hour < 23
-    # i.e., only stop in the daytime, not at night
-    if (( HOUR >= END_HOUR && HOUR < 23 )); then
+    if (( HOUR_DEC >= END_HOUR && HOUR_DEC < 23 )); then
         exit 0
     fi
 
