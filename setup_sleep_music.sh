@@ -6,6 +6,7 @@ set -e
 SCRIPT_DIR="$HOME/git/daily_tools"
 PLAYER_SCRIPT="$SCRIPT_DIR/play_sleep_music.sh"
 PLIST_PATH="$HOME/Library/LaunchAgents/com.user.sleepmusic.plist"
+TMP_PATH="$HOME/tmp"
 
 # Check that play_sleep_music.sh exists
 if [[ ! -f "$PLAYER_SCRIPT" ]]; then
@@ -36,8 +37,12 @@ cat > "$PLIST_PATH" <<EOF
     </dict>
 
     <key>KeepAlive</key><false/>
-
     <key>RunAtLoad</key><false/>
+
+	<key>StandardOutPath</key>
+    <string>$TMP_PATH/sleep_music_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>$TMP_PATH/sleep_music_launchd.err</string>
 </dict>
 </plist>
 EOF
