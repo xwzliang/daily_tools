@@ -1,12 +1,23 @@
 #!/bin/bash
 
 MP3="/Users/broliang/Music/sleep_meditation.mp3"
-END_HOUR=7  # Stop at 07:00
+END_HOUR=9  # Stop at 07:00
 BLUETOOTH_SPEAKER_ADDR="50-4f-3b-d2-27-74"
+BLUEUTIL="/usr/local/bin/blueutil"
+LOGFILE="$HOME/tmp/sleep_music.log"
+
+# Ensure PATH is sane (launchd jobs have almost nothing)
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+log() {
+    # log with timestamp
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOGFILE"
+}
 
 connect_bluetooth() {
     echo "Connecting to Bluetooth speaker..."
-    blueutil --connect "$BLUETOOTH_SPEAKER_ADDR"
+    log "Trying to connect to Bluetooth speaker ($BLUETOOTH_SPEAKER_ADDR)..."
+    "$BLUEUTIL" --connect "$BLUETOOTH_SPEAKER_ADDR"
     sleep 2
 }
 
@@ -20,9 +31,11 @@ while true; do
     fi
 
 	# Ensure Bluetooth stays connected
-    if [[ "$(blueutil --is-connected "$BLUETOOTH_SPEAKER_ADDR")" == "0" ]]; then
+    if [[ "$("$BLUEUTIL" --is-connected "$BLUETOOTH_SPEAKER_ADDR")" == "0" ]]; then
+		log "Speaker is not connected. Attempting reconnect..."
         connect_bluetooth
     fi
 
-    afplay "$MP3"
+	log "Starting playback of $MP3"
+    afplay "$MP3" || log "afplay exited with code $?"
 done
