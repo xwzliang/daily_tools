@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SEASON="01"
+DRY_RUN=false
+
+# Parse arguments
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run|-n)
+      DRY_RUN=true
+      ;;
+    *)
+      echo "Unknown argument: $arg"
+      echo "Usage: $0 [--dry-run|-n]"
+      exit 1
+      ;;
+  esac
+done
+
+echo "Dry run mode: $DRY_RUN"
+echo
+
+for f in *.mp4; do
+  [[ -f "$f" ]] || continue
+
+  TITLE=""
+  EP=""
+
+  # Pattern 1: [Group][Title][06]...
+  if [[ "$f" =~ ^\[([^\]]+)\]\[([^\]]+)\]\[([0-9]+)\] ]]; then
+    RAW_TITLE="${BASH_REMATCH[2]}"
+    EP="${BASH_REMATCH[3]}"
+    TITLE="${RAW_TITLE//_/ }"
+
+  # Pattern 2: [Title][01]...
+  elif [[ "$f" =~ ^\[([^\]]+)\]\[([0-9]+)\] ]]; then
+    RAW_TITLE="${BASH_REMATCH[1]}"
+    EP="${BASH_REMATCH[2]}"
+    TITLE="${RAW_TITLE//_/ }"
+
+  else
+    echo "Skipping (no match): $f"
+    continue
+  fi
+
+  # Force base-10 and zero-pad
+  EP_PADDED=$(printf "%02d" $((10#$EP)))
+
+  NEW_NAME="${TITLE} - S${SEASON}E${EP_PADDED}.mp4"
+
+  echo "--------------------------------"
+  echo "FROM: $f"
+  echo "TO:   $NEW_NAME"
+
+  if [[ "$DRY_RUN" == false ]]; then
+    mv -n "$f" "$NEW_NAME"
+  fi
+done
+
+echo
+echo "Done."
