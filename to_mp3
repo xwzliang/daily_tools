@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+# Usage:
+#   ./convert_to_mp3.sh input_video.mp4 [output_audio.mp3]
+
+input="$1"
+output="$2"
+
+if [[ -z "$input" ]]; then
+    echo "Usage: $0 <input_video> [output_mp3]"
+    exit 1
+fi
+
+# If no output is provided, change extension of input to .mp3
+if [[ -z "$output" ]]; then
+    # Remove existing extension and append .mp3
+    base="${input%.*}"
+    output="${base}.mp3"
+fi
+
+# Convert video → MP3
+ffmpeg -y -i "$input" -vn -acodec libmp3lame -ab 192k -ar 44100 "$output"

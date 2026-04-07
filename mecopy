@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+string_for_copy="$1"
+
+echo -n "$string_for_copy" | xclip -selection clipboard
