@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+
+# Usage:
+#   ./extract_subclip.sh input_file [start_time] [end_time] [output_file]
+#   ./extract_subclip.sh input_file [-s|--start start_time] [-e|--end end_time] [output_file]
+
+input=""
+start=""
+end=""
+output=""
+
+# ---- First argument must be the input file ----
+if [[ -n "$1" ]]; then
+    input="$1"
+    shift
+else
+    echo "Usage: $0 <input_file> [start] [end] [output] [-s <start>] [-e <end>]"
+    exit 1
+fi
+
+# ---- Parse remaining arguments ----
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -s|--start)
+            start="$2"
+            shift 2
+            ;;
+        -e|--end)
+            end="$2"
+            shift 2
+            ;;
+        *)
+            # If start not set yet, treat as positional start
+            if [[ -z "$start" ]]; then
+                start="$1"
+            # If end not set yet, treat as positional end
+            elif [[ -z "$end" ]]; then
+                end="$1"
+            # Otherwise treat as output filename
+            elif [[ -z "$output" ]]; then
+                output="$1"
+            else
+                echo "Unexpected argument: $1"
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
+
+# ---- Auto-generate output filename ----
+if [[ -z "$output" ]]; then
+    base="${input%.*}"
+    ext="${input##*.}"
+
+    safe_start="${start//:/-}"
+    safe_end="${end//:/-}"
+
+    [[ -z "$safe_start" ]] && safe_start="start"
+    [[ -z "$safe_end" ]]  && safe_end="end"
+
+    output="${base}_sub_${safe_start}_${safe_end}.${ext}"
+fi
+
+# ---- Build ffmpeg command ----
+ffmpeg_cmd=(ffmpeg -y -i "$input")
+
+if [[ -n "$start" ]]; then
+    ffmpeg_cmd+=(-ss "$start")
+fi
+
+if [[ -n "$end" ]]; then
+    ffmpeg_cmd+=(-to "$end")
+fi
+
+ffmpeg_cmd+=(-c copy "$output")
+
+# ---- Execute ----
+"${ffmpeg_cmd[@]}"
