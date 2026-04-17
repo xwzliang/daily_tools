@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from __future__ import annotations
 
 import argparse
@@ -11,12 +12,7 @@ def ass_time_to_cs(time_str: str) -> int:
     """
     h, m, s_cs = time_str.strip().split(":")
     s, cs = s_cs.split(".")
-    return (
-        int(h) * 3600 * 100
-        + int(m) * 60 * 100
-        + int(s) * 100
-        + int(cs)
-    )
+    return int(h) * 3600 * 100 + int(m) * 60 * 100 + int(s) * 100 + int(cs)
 
 
 def cs_to_ass_time(total_cs: int) -> str:
@@ -129,8 +125,7 @@ def shift_ass_file(
         lines = f.readlines()
 
     new_lines = [
-        shift_ass_dialogue_line(line, cutoff_cs, shift_cs, mode=mode)
-        for line in lines
+        shift_ass_dialogue_line(line, cutoff_cs, shift_cs, mode=mode) for line in lines
     ]
 
     with output_path.open("w", encoding="utf-8", newline="") as f:

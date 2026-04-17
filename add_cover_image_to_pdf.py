@@ -1,31 +1,33 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 import os
 import sys
 import re
 
+
 def rm_invalid_chars(filename):
-    filename_replace_invalid_chars = re.sub('[^A-Za-z0-9._-]', '_', filename)
+    filename_replace_invalid_chars = re.sub("[^A-Za-z0-9._-]", "_", filename)
     if os.path.exists(filename):
         os.rename(filename, filename_replace_invalid_chars)
     return filename_replace_invalid_chars
 
+
 cover_image = rm_invalid_chars(sys.argv[1])
 pdf = rm_invalid_chars(sys.argv[2])
 
-cover_pdf = cover_image.split('.')[0] + '_cover.pdf'
-out_pdf = pdf.replace('.pdf', '_final.pdf')
+cover_pdf = cover_image.split(".")[0] + "_cover.pdf"
+out_pdf = pdf.replace(".pdf", "_final.pdf")
 
 # Remove ImageMagick restriction policy file if existed
 policy_file = "/etc/ImageMagick-6/policy.xml"
 if os.path.exists(policy_file):
-	os.rename(policy_file, policy_file+"out")
+    os.rename(policy_file, policy_file + "out")
 
 # Use convert to convert image to pdf
-os.system('convert {} {}'.format(cover_image, cover_pdf))
+os.system("convert {} {}".format(cover_image, cover_pdf))
 
 # Use qpdf to concatnate cover_pdf and pdf
-os.system('qpdf --empty --pages {} {} -- {}'.format(cover_pdf, pdf, out_pdf))
+os.system("qpdf --empty --pages {} {} -- {}".format(cover_pdf, pdf, out_pdf))
 
 if os.path.exists(out_pdf):
-    os.system('rm {} {}'.format(cover_image, cover_pdf))
+    os.system("rm {} {}".format(cover_image, cover_pdf))
