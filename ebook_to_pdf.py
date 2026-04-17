@@ -17,7 +17,7 @@ def convert_book(ebook):
     #     )
     # )
     os.system(
-        "ebook-convert {} {} --output-profile=tablet --minimum-line-height=1.5 --change-justification='justify' --pdf-page-margin-left=72 --pdf-page-margin-right=72 --pdf-page-margin-top=72 --pdf-page-margin-bottom=72".format(
+        "ebook-convert {} {} --output-profile=tablet --minimum-line-height=1.5 --change-justification='justify' --pdf-page-margin-left=72 --pdf-page-margin-right=72 --pdf-page-margin-top=72 --pdf-page-margin-bottom=72 --filter-css=font-family".format(
             ebook_replace_invalid_chars, pdf_name
         )
     )
