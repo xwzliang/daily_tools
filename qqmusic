@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+COOKIE="$(get_cookie.py 'https://y.qq.com/')"
+echo $COOKIE
+musicdl \
+  -p 'https://y.qq.com/n/ryqq_v2/playlist/9698538390' \
+  -m QQMusicClient \
+  -i "{\"QQMusicClient\": {\"default_search_cookies\": \"$COOKIE\", \"default_download_cookies\": \"$COOKIE\"}}"
