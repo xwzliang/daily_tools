@@ -7,6 +7,16 @@ import glob
 import subprocess
 
 
+EXTRA_CONVERSION_CSS = (
+    "* { "
+    "font-variant-ligatures: none !important; "
+    'font-feature-settings: "liga" 0, "clig" 0, "dlig" 0 !important; '
+    '-webkit-font-feature-settings: "liga" 0, "clig" 0, "dlig" 0 !important; '
+    "text-rendering: optimizeSpeed !important; "
+    "}"
+)
+
+
 def clean_author(author):
     parts = [part.strip() for part in author.split(",")]
     parts = [
@@ -99,6 +109,7 @@ def convert_book(ebook):
             "--minimum-line-height=1.5",
             "--change-justification=justify",
             "--filter-css=background-color,background",
+            f"--extra-css={EXTRA_CONVERSION_CSS}",
             "--pdf-page-margin-left=72",
             "--pdf-page-margin-right=72",
             "--pdf-page-margin-top=72",
