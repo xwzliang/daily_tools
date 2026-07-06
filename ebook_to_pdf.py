@@ -4,6 +4,7 @@ import sys
 import os
 import re
 import glob
+import subprocess
 
 
 def clean_author(author):
@@ -89,10 +90,21 @@ def convert_book(ebook):
     #         ebook, pdf_name
     #     )
     # )
-    os.system(
-        "ebook-convert {} {} --output-profile=tablet --minimum-line-height=1.5 --change-justification='justify' --pdf-page-margin-left=72 --pdf-page-margin-right=72 --pdf-page-margin-top=72 --pdf-page-margin-bottom=72".format(
-            ebook, pdf_name
-        )
+    subprocess.run(
+        [
+            "ebook-convert",
+            ebook,
+            pdf_name,
+            "--output-profile=tablet",
+            "--minimum-line-height=1.5",
+            "--change-justification=justify",
+            "--filter-css=background-color,background",
+            "--pdf-page-margin-left=72",
+            "--pdf-page-margin-right=72",
+            "--pdf-page-margin-top=72",
+            "--pdf-page-margin-bottom=72",
+        ],
+        check=True,
     )
 
 
