@@ -40,6 +40,13 @@ for f in *.mp4; do
     EP="${BASH_REMATCH[2]}"
     TITLE="${RAW_TITLE//_/ }"
 
+  # Pattern 3: Title 第01集_3840x2160.mp4
+  elif [[ "$f" =~ ^(.+)[[:space:]]*第([0-9]+)集.*\.mp4$ ]]; then
+    RAW_TITLE="${BASH_REMATCH[1]}"
+    EP="${BASH_REMATCH[2]}"
+    TITLE="${RAW_TITLE//_/ }"
+    TITLE="${TITLE%"${TITLE##*[![:space:]]}"}"
+
   else
     echo "Skipping (no match): $f"
     continue
