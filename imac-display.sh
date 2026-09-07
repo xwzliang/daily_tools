@@ -13,6 +13,13 @@ case "$ACTION" in
     ;;
 esac
 
+# Navigate by pane identifier before using accessibility APIs.  This works even
+# when the sidebar is collapsed or its SwiftUI accessibility tree is incomplete.
+if ! /usr/bin/open -b com.apple.systempreferences \
+  'x-apple.systempreferences:com.apple.Displays-Settings.extension' 2>/dev/null; then
+  : # The AppleScript below retains a UI fallback for older macOS versions.
+fi
+
 osascript - "$ACTION" "$TARGET" <<'APPLESCRIPT'
 use scripting additions
 
@@ -20,7 +27,9 @@ on run argv
   set requestedAction to item 1 of argv
   set targetName to item 2 of argv
 
-  tell application "System Settings" to activate
+  tell application "System Settings"
+    activate
+  end tell
 
   tell application "System Events"
     if UI elements enabled is false then error "Accessibility permission is required for the app running this script."
@@ -85,21 +94,33 @@ on waitForWindow(settingsProcess, timeoutSeconds)
 end waitForWindow
 
 on openDisplaysPane(settingsProcess)
-  if my findElementByIdentifier(settingsProcess, "AXPopUpButton", "plus") is not missing value then return
+  -- Give the deep link time to finish loading before falling back to the UI.
+  repeat 24 times
+    if my findElementByIdentifier(settingsProcess, "AXPopUpButton", "plus") is not missing value then return
+    delay 0.25
+  end repeat
+
+  -- Fallback for macOS versions where the pane is not scriptable.  Match any
+  -- accessibility element named Displays rather than assuming the AXRow itself
+  -- owns the label.
   tell application "System Events"
     tell settingsProcess
       set allItems to entire contents of window 1
       repeat with anItem in allItems
         try
-          if role of anItem is "AXRow" and name of anItem is "Displays" then
-            select anItem
+          if name of anItem is "Displays" then
+            if role of anItem is "AXRow" then
+              select anItem
+            else
+              click anItem
+            end if
             return
           end if
         end try
       end repeat
     end tell
   end tell
-  error "Could not navigate to Displays. Open System Settings > Displays once, then run the script again."
+  error "Could not navigate to Displays in System Settings."
 end openDisplaysPane
 
 on waitForDisplaysPane(settingsProcess, timeoutSeconds)
