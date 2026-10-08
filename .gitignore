@@ -2,3 +2,5 @@ downloads/
 .DS_Store
 *.pyc
 __pycache__/
+
+.env.apply_school

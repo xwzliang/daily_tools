@@ -2,7 +2,7 @@
 
 Install dependency: python3 -m pip install selenium
 Set APPLY_SCHOOL_NAME, APPLY_SCHOOL_PHONE, and APPLY_SCHOOL_ID_NUMBER
-in your environment, then run: python3 apply_school.py --photo /path/to/photo.jpg
+in .env.apply_school beside this script (or in your environment), then run: python3 apply_school.py --photo /path/to/photo.jpg
 Keep personal values outside the Git repository.
 """
 
@@ -12,11 +12,35 @@ from pathlib import Path
 import sys
 
 
+def load_env(path):
+    """Read literal KEY=VALUE settings without executing shell expressions."""
+    if not path.is_file():
+        return
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if not separator or not key.isidentifier():
+            raise ValueError(f"Invalid env setting at {path}:{line_number}")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--photo", type=Path, default=Path.home() / "sync/selfie.jpg")
     parser.add_argument("--timeout", type=float, default=30)
+    parser.add_argument("--env-file", type=Path,
+                        default=Path(__file__).resolve().with_name(".env.apply_school"))
     args = parser.parse_args()
+    try:
+        load_env(args.env_file.expanduser())
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
     required = ("APPLY_SCHOOL_NAME", "APPLY_SCHOOL_PHONE", "APPLY_SCHOOL_ID_NUMBER")
     personal = {key: os.environ.get(key, "").strip() for key in required}
     missing = [key for key, value in personal.items() if not value]
