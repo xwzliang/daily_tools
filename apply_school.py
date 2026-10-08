@@ -2,7 +2,7 @@
 
 Install dependency: python3 -m pip install selenium
 Set APPLY_SCHOOL_NAME, APPLY_SCHOOL_PHONE, and APPLY_SCHOOL_ID_NUMBER
-in .env.apply_school beside this script (or in your environment), then run: python3 apply_school.py --photo /path/to/photo.jpg
+in ~/sync/.env.apply_school (or in your environment), then run: python3 apply_school.py --photo /path/to/photo.jpg
 Keep personal values outside the Git repository.
 """
 
@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--photo", type=Path, default=Path.home() / "sync/selfie.jpg")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--env-file", type=Path,
-                        default=Path(__file__).resolve().with_name(".env.apply_school"))
+                        default=Path.home() / "sync/.env.apply_school")
     args = parser.parse_args()
     try:
         load_env(args.env_file.expanduser())
