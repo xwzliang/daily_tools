@@ -1,112 +1,111 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import pyautogui
-import time
+"""Fill the school visitor form, leaving final submission to the user.
 
-# Path to your WebDriver executable
-# driver_path = "/path/to/chromedriver"
+Install dependency: python3 -m pip install selenium
+Set APPLY_SCHOOL_NAME, APPLY_SCHOOL_PHONE, and APPLY_SCHOOL_ID_NUMBER
+in your environment, then run: python3 apply_school.py --photo /path/to/photo.jpg
+Keep personal values outside the Git repository.
+"""
 
-# Initialize the Chrome WebDriver
-# driver = webdriver.Chrome(executable_path=driver_path)
-driver = webdriver.Firefox()
+import argparse
+import os
+from pathlib import Path
+import sys
 
-# Open the webpage
-driver.get("https://qrc.dlj100.cn/visit/off/apply?schId=12223&access=1")
 
-# try:
-# Wait for the page to load
-time.sleep(1)
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--photo", type=Path, default=Path.home() / "sync/selfie.jpg")
+    parser.add_argument("--timeout", type=float, default=30)
+    args = parser.parse_args()
+    required = ("APPLY_SCHOOL_NAME", "APPLY_SCHOOL_PHONE", "APPLY_SCHOOL_ID_NUMBER")
+    personal = {key: os.environ.get(key, "").strip() for key in required}
+    missing = [key for key, value in personal.items() if not value]
+    if missing:
+        parser.error("Set these environment variables before running: " + ", ".join(missing))
+    photo = args.photo.expanduser().resolve()
+    if not photo.is_file():
+        parser.error(f"Photo does not exist: {photo}. Supply --photo /path/to/photo.jpg")
+    if args.timeout <= 0:
+        parser.error("--timeout must be greater than zero")
 
-# Fill in the fields (replace the element locators as per the actual HTML)
+    try:
+        from selenium import webdriver
+        from selenium.common.exceptions import TimeoutException, WebDriverException
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+    except ImportError:
+        print("Missing Selenium. Install it with: python3 -m pip install selenium", file=sys.stderr)
+        return 1
 
-# Visitor Name (访客姓名)
-name_field = driver.find_element(By.XPATH, "//input[@placeholder='请输入真实姓名']")
-name_field.send_keys("")
+    driver = None
+    step = "starting Firefox (Firefox must be installed)"
+    try:
+        driver = webdriver.Firefox()
+        wait = WebDriverWait(driver, args.timeout)
 
-# Visitor Identity (访客身份) - might be a dropdown, need to click and select
-identity_dropdown = driver.find_element(By.ID, "visitor_identity")
-identity_dropdown.click()
-WebDriverWait(driver, 10).until(
-    EC.presence_of_element_located((By.XPATH, "//div[contains(text(),'其他人员')]"))
-).click()
-driver.find_element(By.XPATH, "//a[contains(text(),'完成')]").click()
-time.sleep(1)
-WebDriverWait(driver, 10).until(
-    EC.presence_of_element_located((By.XPATH, "//div[contains(text(),'其他')]"))
-).click()
-driver.find_element(By.XPATH, "//a[contains(text(),'完成')]").click()
-# You might need to choose a value from the dropdown. This depends on the available options.
+        def clickable(by, value):
+            nonlocal step
+            step = f"waiting for {value}"
+            return wait.until(EC.element_to_be_clickable((by, value)))
 
-phone_field = driver.find_element(By.ID, "phone")
-phone_field.send_keys("")
+        step = "loading the application page"
+        driver.get("https://qrc.dlj100.cn/visit/off/apply?schId=12223&access=1")
+        name_field = clickable(By.XPATH, "//input[@placeholder='请输入真实姓名']")
+        name_field.send_keys(personal["APPLY_SCHOOL_NAME"])
 
-# ID Number (身份证)
-id_field = driver.find_element(By.XPATH, "//input[@placeholder='请输入身份证号码']")
-id_field.send_keys("")
+        identity_dropdown = clickable(By.ID, "visitor_identity")
+        identity_dropdown.click()
+        wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//div[normalize-space()='其他人员']"))
+        ).click()
+        clickable(By.XPATH, "//a[contains(text(),'完成')]").click()
+        wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//div[normalize-space()='其他']"))
+        ).click()
+        clickable(By.XPATH, "//a[contains(text(),'完成')]").click()
 
-company_field = driver.find_element(By.ID, "company_name")
-company_field.send_keys("外企德科")
-# Car Plate (车牌号)
-# car_field = driver.find_element(By.XPATH, "//input[@placeholder='请输入来访车牌号']")
-# car_field.send_keys("ABC-1234")
+        phone_field = clickable(By.ID, "phone")
+        phone_field.send_keys(personal["APPLY_SCHOOL_PHONE"])
 
-# Visit Time (来访时间) - You may need to handle this with JavaScript if it's a date picker
-# Example for inputting a date manually:
-# visit_time_field = driver.find_element(
-#     By.XPATH, "//input[@placeholder='2024-10-21 10:30']"
-# )
-# visit_time_field.send_keys("2024-10-21 10:30")
+        id_field = clickable(By.XPATH, "//input[@placeholder='请输入身份证号码']")
+        id_field.send_keys(personal["APPLY_SCHOOL_ID_NUMBER"])
 
-# Visitor Purpose (来访目的) - This might be a text field or dropdown
-# purpose_field = driver.find_element(By.XPATH, "//input[@placeholder='请选择']")
-# purpose_field.click()
-# Select the appropriate option if it's a dropdown
+        company_field = clickable(By.ID, "company_name")
+        company_field.send_keys("外企德科")
 
-text_field = driver.find_element(By.ID, "remark")
-text_field.send_keys("家属")
+        text_field = clickable(By.ID, "remark")
+        text_field.send_keys("家属")
 
-driver.find_element(By.ID, "tch").click()
-WebDriverWait(driver, 10).until(
-    EC.presence_of_element_located((By.ID, "find_tch"))
-).send_keys("邹")
-WebDriverWait(driver, 10).until(
-    EC.presence_of_element_located((By.XPATH, "//input[@value='邹子建']"))
-).click()
+        clickable(By.ID, "tch").click()
+        wait.until(
+            EC.element_to_be_clickable((By.ID, "find_tch"))
+        ).send_keys("邹")
+        wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//input[@value='邹子建']"))
+        ).click()
 
-time.sleep(1)
-photo_field = driver.find_element(By.ID, "upload")
-photo_field.click()
+        step = "locating the photo upload input"
+        # Selenium uploads directly, including when the input is hidden by styling.
+        upload = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='file']")))
+        upload.send_keys(str(photo))
 
-time.sleep(2)
-pyautogui.hotkey("command", "shift", "g", interval=0.25)
-time.sleep(1)
-photo_path = "/Users/broliang/Pictures/selfie.jpg"
-pyautogui.write(photo_path)
-pyautogui.press("enter")
+        step = "confirming the photo crop"
+        clickable(By.ID, "confirmBtn").click()
+        step = "dismissing the photo confirmation"
+        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='OK']"))).click()
+        print("Form filled. Review it in Firefox and submit manually if correct.")
+        input("Press Enter to close Firefox after reviewing the form: ")
+        return 0
+    except (TimeoutException, WebDriverException) as exc:
+        print(f"Failed while {step}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    except (EOFError, KeyboardInterrupt):
+        return 0
+    finally:
+        if driver is not None:
+            driver.quit()
 
-time.sleep(1)
-pyautogui.press("enter")
-time.sleep(5)
 
-WebDriverWait(driver, 10).until(
-    EC.presence_of_element_located((By.ID, "confirmBtn"))
-).click()
-time.sleep(3)
-WebDriverWait(driver, 10).until(
-    EC.presence_of_element_located((By.XPATH, "//button[contains(text(),'OK')]"))
-).click()
-time.sleep(2)
-
-# Finally, submit the form
-# submit_button = driver.find_element(By.XPATH, "//a[contains(text(), '预约申请')]")
-# submit_button.click()
-# print(submit_button)
-
-# Wait to observe the result
-# time.sleep(5)
-
-# finally:
-#     # Close the driver
-# driver.quit()
+if __name__ == "__main__":
+    sys.exit(main())
