@@ -35,17 +35,31 @@ on approvePrompt(container)
     repeat with element in elements
       try
         if class of element is static text then
-          set labelText to value of element as text
-          if labelText contains "remote debugging" then set isDebuggingPrompt to true
+          set labelText to ""
+          try
+            set labelText to value of element as text
+          end try
+          if labelText is "" then
+            try
+              set labelText to name of element as text
+            end try
+          end if
+          if (labelText contains "remote debugging") or (labelText contains "远程调试") then set isDebuggingPrompt to true
         end if
       end try
     end repeat
     if not isDebuggingPrompt then return false
     repeat with element in elements
       try
-        if class of element is button and name of element is "Allow" then
-          click element
-          return true
+        if class of element is button then
+          set btnName to ""
+          try
+            set btnName to name of element as text
+          end try
+          if (btnName is "Allow") or (btnName is "允许") or (btnName contains "允许") or (btnName contains "Allow") then
+            click element
+            return true
+          end if
         end if
       end try
     end repeat
