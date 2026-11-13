@@ -1,10 +1,12 @@
 import tempfile
 import unittest
 import zipfile
+import io
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
-from ebook_to_pdf import epub_toc_options, convert_book
+from ebook_to_pdf import epub_toc_options, convert_book, heading_toc_options
 
 
 class TocFallbackTests(unittest.TestCase):
@@ -24,6 +26,38 @@ class TocFallbackTests(unittest.TestCase):
                         text = '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>' + ''.join(f'<navPoint><navLabel><text>{label}</text></navLabel><content src="chapter.xhtml"/></navPoint>' for label in labels) + '</navMap></ncx>'
                     archive.writestr('OEBPS/toc.xml', text)
             return epub_toc_options(str(book))
+
+    def heading_options(self, documents):
+        ns = {"h": "http://www.w3.org/1999/xhtml"}
+        data = io.BytesIO()
+        items = []
+        spine = ET.Element("spine")
+        with zipfile.ZipFile(data, "w") as archive:
+            for index, body in enumerate(documents):
+                name = f"{index}.xhtml"
+                archive.writestr(name, '<html xmlns="' + ns["h"] + '">' + body + '</html>')
+                items.append(ET.Element("item", id=str(index), href=name))
+                ET.SubElement(spine, "itemref", idref=str(index))
+            return heading_toc_options(archive, "content.opf", items, spine, ns)
+
+    def test_parts_chapters_and_front_matter_across_files(self):
+        options = self.heading_options([
+            '<h3>Subtitle</h3><h3>Author</h3>',
+            '<h2>Part One</h2><h3>1 Chapter</h3>',
+            '<h3>2 Chapter</h3><h2>Part Two</h2><h3>3 Chapter</h3>',
+        ])
+        self.assertEqual(options, [
+            '--use-auto-toc',
+            "--level1-toc=//h:h2[normalize-space(.) != 'Subtitle'][normalize-space(.) != 'Author']",
+            "--level2-toc=//h:h3[normalize-space(.) != 'Subtitle'][normalize-space(.) != 'Author']",
+        ])
+
+    def test_single_rank_and_three_ranks(self):
+        self.assertEqual(self.heading_options(['<h3>Chapter</h3>']),
+                         ['--use-auto-toc', '--level1-toc=//h:h3'])
+        self.assertEqual(self.heading_options(['<h1>Part</h1><h2>Chapter</h2><h3>Section</h3>']),
+                         ['--use-auto-toc', '--level1-toc=//h:h1',
+                          '--level2-toc=//h:h2', '--level3-toc=//h:h3'])
 
     def test_missing_empty_and_start_navigation(self):
         for nav in (False, True):

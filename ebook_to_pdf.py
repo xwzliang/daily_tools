@@ -83,6 +83,50 @@ def clean_ebook_filename(ebook_path):
     return os.path.join(directory, name_cleaned + ext)
 
 
+def heading_toc_options(archive, opf_path, items, spine, ns):
+    """Map heading ranks to TOC levels, ignoring headings before the first root.
+
+    Some EPUBs put subtitle/author h3s before their first part h2. Read in
+    spine order (including across files) so those do not become TOC entries.
+    """
+    headings = []
+    by_id = {item.get("id"): item for item in items}
+    for ref in spine if spine is not None else []:
+        item = by_id.get(ref.get("idref"))
+        if item is None or ref.get("linear") == "no":
+            continue
+        path = posixpath.normpath(posixpath.join(
+            posixpath.dirname(opf_path), unquote(item.get("href", ""))))
+        try:
+            document = ET.fromstring(archive.read(path))
+        except (KeyError, ET.ParseError):
+            continue
+        for element in document.iter():
+            for rank in (1, 2, 3):
+                if element.tag == "{" + ns["h"] + "}h" + str(rank):
+                    text = " ".join("".join(element.itertext()).split())
+                    if text:
+                        headings.append((rank, text))
+    ranks = sorted({rank for rank, _ in headings}) or [1, 2, 3]
+    excluded = []
+    for rank, text in headings:
+        if rank == ranks[0]:
+            break
+        excluded.append(text)
+
+    def xpath_literal(text):
+        if "'" not in text:
+            return "'" + text + "'"
+        return "concat(" + ", \"'\", ".join("'" + part + "'" for part in text.split("'")) + ")"
+
+    predicate = "".join(
+        "[normalize-space(.) != " + xpath_literal(text) + "]" for text in excluded)
+    return ["--use-auto-toc"] + [
+        f"--level{level}-toc=//h:h{rank}{predicate}"
+        for level, rank in enumerate(ranks, 1)
+    ]
+
+
 def epub_toc_options(ebook):
     """Rebuild missing/placeholder EPUB navigation, leaving useful TOCs intact."""
     if not ebook.lower().endswith(".epub"):
@@ -131,13 +175,14 @@ def epub_toc_options(ebook):
                             labels.append(" ".join(label.itertext()).strip())
             if any(label and label.casefold() != "start" for label in labels):
                 return []
+            options = heading_toc_options(archive, opf_path, items, spine, ns)
     except (OSError, zipfile.BadZipFile, KeyError, AttributeError, ET.ParseError) as error:
         # Let Calibre handle inputs we cannot inspect; never override unknown navigation.
         print(f"Could not inspect EPUB navigation: {error}", file=sys.stderr)
         return []
 
     print("EPUB navigation is missing or only Start; generating TOC from headings.")
-    return ["--use-auto-toc", "--level1-toc=//h:h1 | //h:h2 | //h:h3"]
+    return options
 
 
 def convert_book(ebook):
