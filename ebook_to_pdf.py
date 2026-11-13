@@ -5,6 +5,10 @@ import os
 import re
 import glob
 import subprocess
+import posixpath
+import zipfile
+import xml.etree.ElementTree as ET
+from urllib.parse import unquote
 
 
 EXTRA_CONVERSION_CSS = (
@@ -79,6 +83,63 @@ def clean_ebook_filename(ebook_path):
     return os.path.join(directory, name_cleaned + ext)
 
 
+def epub_toc_options(ebook):
+    """Rebuild missing/placeholder EPUB navigation, leaving useful TOCs intact."""
+    if not ebook.lower().endswith(".epub"):
+        return []
+
+    ns = {
+        "container": "urn:oasis:names:tc:opendocument:xmlns:container",
+        "opf": "http://www.idpf.org/2007/opf",
+        "ncx": "http://www.daisy.org/z3986/2005/ncx/",
+        "h": "http://www.w3.org/1999/xhtml",
+    }
+    try:
+        with zipfile.ZipFile(ebook) as archive:
+            container = ET.fromstring(archive.read("META-INF/container.xml"))
+            rootfile = container.find("container:rootfiles/container:rootfile", ns)
+            opf_path = rootfile.attrib["full-path"]
+            package = ET.fromstring(archive.read(opf_path))
+            items = package.findall("opf:manifest/opf:item", ns)
+            spine = package.find("opf:spine", ns)
+            ncx_id = spine.get("toc") if spine is not None else None
+            labels = []
+            for item in items:
+                is_nav = "nav" in item.get("properties", "").split()
+                is_ncx = (item.get("id") == ncx_id or
+                          item.get("media-type") == "application/x-dtbncx+xml")
+                if not (is_nav or is_ncx):
+                    continue
+                path = posixpath.normpath(posixpath.join(
+                    posixpath.dirname(opf_path), unquote(item.attrib["href"])))
+                try:
+                    navigation = ET.fromstring(archive.read(path))
+                except (KeyError, ET.ParseError):
+                    continue  # Missing/broken navigation can be rebuilt from headings.
+                if is_nav:
+                    for nav in navigation.findall(".//h:nav", ns):
+                        kind = nav.get("{http://www.idpf.org/2007/ops}type", "")
+                        if "toc" in kind.split():
+                            labels.extend(" ".join(a.itertext()).strip()
+                                          for a in nav.findall(".//h:a", ns)
+                                          if a.get("href"))
+                else:
+                    for point in navigation.findall(".//ncx:navPoint", ns):
+                        label = point.find("ncx:navLabel", ns)
+                        content = point.find("ncx:content", ns)
+                        if label is not None and content is not None and content.get("src"):
+                            labels.append(" ".join(label.itertext()).strip())
+            if any(label and label.casefold() != "start" for label in labels):
+                return []
+    except (OSError, zipfile.BadZipFile, KeyError, AttributeError, ET.ParseError) as error:
+        # Let Calibre handle inputs we cannot inspect; never override unknown navigation.
+        print(f"Could not inspect EPUB navigation: {error}", file=sys.stderr)
+        return []
+
+    print("EPUB navigation is missing or only Start; generating TOC from headings.")
+    return ["--use-auto-toc", "--level1-toc=//h:h1 | //h:h2 | //h:h3"]
+
+
 def convert_book(ebook):
     """Convert ebook to PDF after renaming it"""
     # Clean and rename the file
@@ -105,6 +166,7 @@ def convert_book(ebook):
             "ebook-convert",
             ebook,
             pdf_name,
+            *epub_toc_options(ebook),
             "--output-profile=tablet",
             "--minimum-line-height=1.5",
             "--change-justification=justify",
