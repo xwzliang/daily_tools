@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 
+import argparse
+import ctypes
+import errno
 import sys
+import shutil
+import tempfile
+from pathlib import Path
 import os
 import re
 import glob
@@ -45,7 +51,7 @@ def find_year(parts):
     return ""
 
 
-def clean_ebook_filename(ebook_path):
+def clean_ebook_filename(ebook_path, preserve_unicode=False):
     """
     Clean ebook filename by:
     1. Keeping title, author, and year for Anna's Archive filename exports
@@ -78,7 +84,8 @@ def clean_ebook_filename(ebook_path):
     name = name.rstrip(' -')
     
     # Replace remaining invalid characters with underscores
-    name_cleaned = re.sub("[^A-Za-z0-9._-]", "_", name)
+    allowed = r"[^\w.-]" if preserve_unicode else r"[^A-Za-z0-9._-]"
+    name_cleaned = re.sub(allowed, "_", name)
     
     return os.path.join(directory, name_cleaned + ext)
 
@@ -185,27 +192,8 @@ def epub_toc_options(ebook):
     return options
 
 
-def convert_book(ebook):
-    """Convert ebook to PDF after renaming it"""
-    # Clean and rename the file
-    ebook_renamed = clean_ebook_filename(ebook)
-    if ebook != ebook_renamed:
-        print(f"Renaming: {ebook} -> {ebook_renamed}")
-        os.rename(ebook, ebook_renamed)
-        ebook = ebook_renamed
-    
-    # If it's already a PDF, just return (no conversion needed)
-    if ebook.lower().endswith('.pdf'):
-        return
-    
-    pdf_name = os.path.splitext(ebook)[0] + ".pdf"
-    
-    # use Calibre ebook converter to convert to pdf
-    # os.system(
-    #     "ebook-convert {} {} --pretty-print --minimum-line-height=1.5 --change-justification='justify'".format(
-    #         ebook, pdf_name
-    #     )
-    # )
+def render_pdf(ebook, pdf_name):
+    """Run Calibre with the existing navigation and typography settings."""
     subprocess.run(
         [
             "ebook-convert",
@@ -226,28 +214,97 @@ def convert_book(ebook):
     )
 
 
-def main():
-    if len(sys.argv) > 1:
-        # Handle multiple arguments (from shell expansion of wildcards) or glob patterns
-        patterns = sys.argv[1:]
-        files_to_process = []
-
-        for pattern in patterns:
-            # Shell-expanded globs may produce filenames with literal glob chars,
-            # such as Anna's Archive names containing [United States_].
-            if os.path.isfile(pattern):
-                files_to_process.append(pattern)
-            elif glob.has_magic(pattern):
-                files_to_process.extend(glob.glob(pattern))
-            else:
-                files_to_process.append(pattern)
-
-        if files_to_process:
-            for ebook in files_to_process:
-                if os.path.isfile(ebook):
-                    convert_book(ebook)
+def move_without_overwrite(source, destination):
+    """Move within a filesystem, atomically refusing an occupied destination."""
+    if sys.platform == "win32":
+        os.rename(source, destination)  # Windows rename refuses existing files.
+        return
+    if sys.platform == "darwin" or sys.platform.startswith("linux"):
+        libc = ctypes.CDLL(None, use_errno=True)
+        src, dst = os.fsencode(source), os.fsencode(destination)
+        if sys.platform == "darwin":
+            result = libc.renamex_np(src, dst, 4)  # RENAME_EXCL
+        elif hasattr(libc, "renameat2"):
+            result = libc.renameat2(-100, src, -100, dst, 1)  # AT_FDCWD, RENAME_NOREPLACE
         else:
-            print("No matching files found")
+            result = -1
+            ctypes.set_errno(errno.ENOSYS)
+        if result == 0:
+            return
+        code = ctypes.get_errno()
+        if code not in (errno.ENOSYS, errno.ENOTSUP, errno.EINVAL):
+            raise OSError(code, os.strerror(code), str(destination))
+    os.link(source, destination, follow_symlinks=False)
+    os.unlink(source)
+
+
+def convert_book(ebook, output_dir=None, dry_run=False):
+    """Publish a complete PDF without clobbering an existing destination."""
+    source = Path(ebook)
+    cleaned = Path(clean_ebook_filename(str(source), preserve_unicode=output_dir is not None))
+    rename = output_dir is None and cleaned != source
+    destination = (Path(output_dir) / cleaned.name if output_dir is not None else cleaned).with_suffix(".pdf")
+    is_pdf = source.suffix.lower() == ".pdf"
+    if is_pdf and output_dir is None:
+        destination = cleaned
+    if rename and os.path.lexists(cleaned):
+        if not cleaned.samefile(source):
+            raise FileExistsError(f"Normalized name already in use: {cleaned}")
+        rename = False
+    if os.path.lexists(destination):
+        if is_pdf and destination.samefile(source):
+            print(f"Already a PDF: {source}")
+            return
+        raise FileExistsError(f"Output already exists: {destination}")
+    if dry_run:
+        print(f"{source} -> {destination}")
+        return
+    if output_dir is not None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    if not (is_pdf and output_dir is None):
+        with tempfile.TemporaryDirectory(prefix=".ebook-pdf-", dir=destination.parent) as tmp:
+            staged = Path(tmp) / "output.pdf"
+            if is_pdf:
+                shutil.copy2(source, staged)
+            else:
+                render_pdf(str(source), str(staged))
+            if not staged.is_file() or staged.stat().st_size == 0:
+                raise OSError(f"Converter produced an empty PDF for {source}")
+            move_without_overwrite(staged, destination)
+    if rename:
+        # Preserve legacy normalized names without replacing another input.
+        move_without_overwrite(source, cleaned)
+    print(f"Ready: {destination}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Convert ebooks with Calibre, preserving useful EPUB navigation.")
+    parser.add_argument("--output-dir", type=Path, help="write PDFs here and keep source files in place")
+    parser.add_argument("--dry-run", action="store_true", help="show output paths without writing or converting")
+    parser.add_argument("books", nargs="*", help="files or quoted glob patterns; no arguments watches the current directory")
+    args = parser.parse_args()
+    if args.books:
+        failures = 0
+        seen = set()
+        for pattern in args.books:
+            matches = [pattern] if os.path.isfile(pattern) else sorted(glob.glob(pattern))
+            files = [path for path in matches if os.path.isfile(path)]
+            if not files:
+                print(f"No matching file: {pattern}", file=sys.stderr)
+                failures += 1
+            for path in files:
+                key = os.path.abspath(path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    convert_book(path, args.output_dir, args.dry_run)
+                except (OSError, subprocess.CalledProcessError) as error:
+                    print(f"Skipped {path}: {error}", file=sys.stderr)
+                    failures += 1
+        return int(failures > 0)
+    elif args.output_dir is not None or args.dry_run:
+        parser.error("specify at least one input file or pattern")
     else:
         import time
 
@@ -263,11 +320,14 @@ def main():
                 if (
                     ".pdf" not in ebook and ".jpg" not in ebook
                 ):  # Don't convert pdf file and jpg
-                    convert_book(ebook)
+                    try:
+                        convert_book(ebook)
+                    except (OSError, subprocess.CalledProcessError) as error:
+                        print(f"Skipped {ebook}: {error}", file=sys.stderr)
                     time.sleep(2)
             # Update the list of files
             old_list_of_files = os.listdir(cwd)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

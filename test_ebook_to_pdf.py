@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
-from ebook_to_pdf import epub_toc_options, convert_book, heading_toc_options
+from ebook_to_pdf import epub_toc_options, convert_book, heading_toc_options, render_pdf
 
 
 class TocFallbackTests(unittest.TestCase):
@@ -82,10 +82,61 @@ class TocFallbackTests(unittest.TestCase):
     @patch('ebook_to_pdf.epub_toc_options', return_value=['--use-auto-toc'])
     @patch('ebook_to_pdf.subprocess.run')
     def test_conversion_passes_fallback_options(self, run, options):
-        convert_book('book.epub')
+        render_pdf('book.epub', 'book.pdf')
         self.assertIn('--use-auto-toc', run.call_args.args[0])
         self.assertTrue(run.call_args.kwargs['check'])
 
+
+
+class SafeConversionTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name)
+        self.source = self.folder / "第一 章.epub"
+        self.source.write_bytes(b"source fixture")
+
+    def test_preview_creates_no_directory(self):
+        destination = self.folder / "new"
+        convert_book(self.source, destination, dry_run=True)
+        self.assertFalse(destination.exists())
+        self.assertEqual(self.source.read_bytes(), b"source fixture")
+
+    def test_output_directory_preserves_original_and_unicode(self):
+        destination = self.folder / "out"
+        with patch("ebook_to_pdf.render_pdf", side_effect=lambda src, out: Path(out).write_bytes(b"%PDF-fixture")):
+            convert_book(self.source, destination)
+        self.assertEqual((destination / "第一_章.pdf").read_bytes(), b"%PDF-fixture")
+        self.assertEqual(self.source.read_bytes(), b"source fixture")
+        with self.assertRaises(FileExistsError):
+            convert_book(self.source, destination)
+
+    def test_existing_normalized_source_is_not_overwritten(self):
+        occupied = self.folder / "my_book.epub"
+        occupied.write_bytes(b"another book")
+        original = self.folder / "my book.epub"
+        original.write_bytes(b"original book")
+        with self.assertRaises(FileExistsError):
+            convert_book(original)
+        self.assertEqual(original.read_bytes(), b"original book")
+        self.assertEqual(occupied.read_bytes(), b"another book")
+
+    def test_failed_converter_does_not_publish_or_rename(self):
+        def fail(src, out):
+            Path(out).write_bytes(b"partial")
+            raise OSError("interrupted")
+        with patch("ebook_to_pdf.render_pdf", side_effect=fail), self.assertRaises(OSError):
+            convert_book(self.source)
+        self.assertEqual(list(self.folder.iterdir()), [self.source])
+
+    def test_concurrent_publication_preserves_winner(self):
+        out = self.folder / "out"
+        def race(src, staged):
+            Path(staged).write_bytes(b"late result")
+            (out / "第一_章.pdf").write_bytes(b"first result")
+        with patch("ebook_to_pdf.render_pdf", side_effect=race), self.assertRaises(FileExistsError):
+            convert_book(self.source, out)
+        self.assertEqual((out / "第一_章.pdf").read_bytes(), b"first result")
 
 if __name__ == '__main__':
     unittest.main()
