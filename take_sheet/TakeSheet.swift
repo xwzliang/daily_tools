@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UniformTypeIdentifiers
 
 @main
 struct TakeSheetApp: App {
@@ -14,7 +15,27 @@ private struct Playback: Identifiable {
     let id = UUID()
     let url: URL
     let start: Double
+    let duration: Double?
     let revision: String
+}
+
+private struct ClipPlayerView: NSViewRepresentable {
+    let player: AVPlayer?
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .inline
+        view.videoGravity = .resizeAspect
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player { view.player = player }
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        view.player = nil
+    }
 }
 
 private struct Screening: View {
@@ -34,7 +55,7 @@ private struct Screening: View {
                 Spacer()
                 Button("Done") { dismiss() }.disabled(draft != nil)
             }.padding()
-            VideoPlayer(player: player).frame(minHeight: 240)
+            ClipPlayerView(player: player).frame(minHeight: 240)
             Divider()
             HStack {
                 Button("Mark Frame", action: beginNote).disabled(store == nil || draft != nil)
@@ -43,6 +64,10 @@ private struct Screening: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(ClipNotes.text(for: playback.url, notes: notes), forType: .string)
                 }.disabled(notes.isEmpty)
+                Menu("Export Chapters") {
+                    Button("WebVTT Chapter Track…") { exportChapters(.webVTT) }
+                    Button("FFmpeg Chapter Metadata…") { exportChapters(.ffmetadata) }
+                }.fixedSize().disabled(notes.isEmpty || playback.duration == nil || draft != nil)
             }.padding(.horizontal).padding(.vertical, 8)
             if let draft {
                 HStack {
@@ -80,6 +105,25 @@ private struct Screening: View {
             video.seek(to: CMTime(seconds: playback.start, preferredTimescale: 600),
                        toleranceBefore: .zero, toleranceAfter: .zero)
         }.onDisappear { player?.pause(); player = nil }
+    }
+
+    private func exportChapters(_ format: ChapterTrack.Format) {
+        guard let duration = playback.duration else { return }
+        do {
+            let track = try ChapterTrack(notes: notes, duration: duration)
+            let panel = NSSavePanel()
+            panel.title = "Export Chapters"
+            panel.directoryURL = playback.url.deletingLastPathComponent()
+            if track.endMarkers > 0 {
+                panel.message = "Markers at the end of the clip are omitted (\(track.endMarkers))."
+            }
+            panel.allowedContentTypes = [UTType(filenameExtension: format.suffix) ?? .plainText]
+            panel.isExtensionHidden = false
+            panel.nameFieldStringValue = playback.url.deletingPathExtension().lastPathComponent + ".chapters." + format.suffix
+            guard panel.runModal() == .OK, let destination = panel.url else { return }
+            try track.encoded(format).write(to: destination, atomically: true, encoding: .utf8)
+            problem = nil
+        } catch { problem = error.localizedDescription }
     }
 
     private func seek(_ time: Double) {
@@ -209,7 +253,7 @@ private struct TakeBrowser: View {
                 HStack(spacing: 6) {
                     ForEach(take.frames) { frame in
                         Button {
-                            playback = Playback(url: take.url, start: frame.time, revision: take.revision)
+                            playback = Playback(url: take.url, start: frame.time, duration: take.duration, revision: take.revision)
                         } label: {
                             ZStack(alignment: .bottomLeading) {
                                 Color.black

@@ -11,7 +11,7 @@ trap 'rm -rf "$stage"' EXIT
 app="$stage/Take Sheet.app"
 mkdir -p "$app/Contents/MacOS"
 mac_arch=$(uname -m)
-xcrun swiftc -O -parse-as-library -target "${mac_arch}-apple-macos13.0" Media.swift ReviewNotes.swift TakeSheet.swift -o "$app/Contents/MacOS/TakeSheet"
+xcrun swiftc -O -parse-as-library -target "${mac_arch}-apple-macos13.0" Media.swift ReviewNotes.swift Chapters.swift TakeSheet.swift -o "$app/Contents/MacOS/TakeSheet"
 cp Info.plist "$app/Contents/Info.plist"
 codesign --force --sign - "$app"
 codesign --verify --strict "$app"
