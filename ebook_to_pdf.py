@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import ctypes
-import errno
 import sys
 import shutil
 import tempfile
@@ -17,6 +15,8 @@ import posixpath
 import zipfile
 import xml.etree.ElementTree as ET
 from urllib.parse import unquote
+
+from daily_tools_lib.publication import move_without_overwrite
 
 
 EXTRA_CONVERSION_CSS = (
@@ -214,30 +214,6 @@ def render_pdf(ebook, pdf_name):
         ],
         check=True,
     )
-
-
-def move_without_overwrite(source, destination):
-    """Move within a filesystem, atomically refusing an occupied destination."""
-    if sys.platform == "win32":
-        os.rename(source, destination)  # Windows rename refuses existing files.
-        return
-    if sys.platform == "darwin" or sys.platform.startswith("linux"):
-        libc = ctypes.CDLL(None, use_errno=True)
-        src, dst = os.fsencode(source), os.fsencode(destination)
-        if sys.platform == "darwin":
-            result = libc.renamex_np(src, dst, 4)  # RENAME_EXCL
-        elif hasattr(libc, "renameat2"):
-            result = libc.renameat2(-100, src, -100, dst, 1)  # AT_FDCWD, RENAME_NOREPLACE
-        else:
-            result = -1
-            ctypes.set_errno(errno.ENOSYS)
-        if result == 0:
-            return
-        code = ctypes.get_errno()
-        if code not in (errno.ENOSYS, errno.ENOTSUP, errno.EINVAL):
-            raise OSError(code, os.strerror(code), str(destination))
-    os.link(source, destination, follow_symlinks=False)
-    os.unlink(source)
 
 
 def file_revision(info):

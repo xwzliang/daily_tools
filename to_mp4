@@ -1,8 +1,2 @@
 #!/usr/bin/env bash
-
-video_format="$1"
-
-for i in *."$video_format"; do
-    ffmpeg -nostats -loglevel error -i "$i" -vcodec libx264 -acodec aac "${i%.*}.mp4"
-    echo "$i finished."
-done
+exec python3 "$(dirname "$(realpath "$0")")/daily_tools_lib/convert_media.py" mp4 "$@"
