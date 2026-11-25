@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import codecs
+import io
 from pathlib import Path
 
 
@@ -44,11 +46,15 @@ def split_line_ending(line: str) -> tuple[str, str]:
     return line, ""
 
 
+DEFAULT_FIELDS = ("layer", "start", "end", "style", "name", "marginl", "marginr", "marginv", "effect", "text")
+
+
 def shift_ass_dialogue_line(
     line: str,
     cutoff_cs: int,
     shift_cs: int,
     mode: str = "start_after",
+    fields_order: tuple[str, ...] = DEFAULT_FIELDS,
 ) -> str:
     """
     Shift ASS dialogue/event line timestamps.
@@ -66,49 +72,34 @@ def shift_ass_dialogue_line(
     if not stripped.startswith(prefixes):
         return line
 
-    # ASS event format:
-    # Dialogue: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-    # Split only first 9 commas after "Dialogue:" or "Comment:"
-    try:
-        prefix, rest = content.split(":", 1)
-        fields = rest.split(",", 9)
-        if len(fields) < 10:
-            return line
-
-        start_str = fields[1]
-        end_str = fields[2]
-
-        start_cs = ass_time_to_cs(start_str)
-        end_cs = ass_time_to_cs(end_str)
-
-        should_shift = False
-        if mode == "start_after":
-            should_shift = start_cs >= cutoff_cs
-        elif mode == "end_after":
-            should_shift = end_cs >= cutoff_cs
-        elif mode == "overlap_after":
-            should_shift = end_cs >= cutoff_cs
-        else:
-            raise ValueError(f"Unsupported mode: {mode}")
-
-        if not should_shift:
-            return line
-
-        new_start = max(0, start_cs + shift_cs)
-        new_end = max(0, end_cs + shift_cs)
-
-        # Safety: ensure end is not before start
-        if new_end < new_start:
-            new_end = new_start
-
-        fields[1] = cs_to_ass_time(new_start)
-        fields[2] = cs_to_ass_time(new_end)
-
-        return f"{prefix}:{','.join(fields)}{line_ending}"
-
-    except Exception:
-        # Leave malformed lines unchanged
+    prefix, rest = content.split(":", 1)
+    fields = rest.split(",", len(fields_order) - 1)
+    if len(fields) != len(fields_order):
         return line
+
+    try:
+        start_index = fields_order.index("start")
+        end_index = fields_order.index("end")
+        start_cs = ass_time_to_cs(fields[start_index])
+        end_cs = ass_time_to_cs(fields[end_index])
+    except ValueError:
+        return line
+
+    if mode == "start_after":
+        compare = start_cs
+    elif mode in ("end_after", "overlap_after"):
+        compare = end_cs
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+    if compare < cutoff_cs or shift_cs == 0:
+        return line
+
+    start = max(0, start_cs + shift_cs)
+    end = max(start, end_cs + shift_cs)
+    for index, value in [(start_index, start), (end_index, end)]:
+        original = fields[index]
+        fields[index] = original.replace(original.strip(), cs_to_ass_time(value), 1)
+    return f"{prefix}:{','.join(fields)}{line_ending}"
 
 
 def shift_ass_file(
@@ -121,15 +112,29 @@ def shift_ass_file(
     cutoff_cs = ass_time_to_cs(cutoff_time)
     shift_cs = int(round(shift_seconds * 100))
 
-    with input_path.open("r", encoding="utf-8-sig", newline="") as f:
-        lines = f.readlines()
-
-    new_lines = [
-        shift_ass_dialogue_line(line, cutoff_cs, shift_cs, mode=mode) for line in lines
-    ]
-
-    with output_path.open("w", encoding="utf-8", newline="") as f:
-        f.writelines(new_lines)
+    data = input_path.read_bytes()
+    bom, encoding = b"", "utf-8"
+    for marker, codec in [(codecs.BOM_UTF8, "utf-8"), (codecs.BOM_UTF16_LE, "utf-16-le"),
+                          (codecs.BOM_UTF16_BE, "utf-16-be")]:
+        if data.startswith(marker):
+            bom, encoding = marker, codec
+            break
+    text = data[len(bom):].decode(encoding)
+    section = None
+    fields = DEFAULT_FIELDS
+    output = []
+    for line in io.StringIO(text, newline=""):
+        header = line.strip().lower()
+        if header.startswith("[") and header.endswith("]"):
+            section = header
+            fields = DEFAULT_FIELDS
+        elif section in (None, "[events]"):
+            if header.startswith("format:"):
+                fields = tuple(name.strip() for name in header.split(":", 1)[1].split(","))
+            elif fields and fields[-1] == "text" and fields.count("start") == fields.count("end") == 1:
+                line = shift_ass_dialogue_line(line, cutoff_cs, shift_cs, mode, fields)
+        output.append(line)
+    output_path.write_bytes(bom + "".join(output).encode(encoding))
 
 
 def main() -> None:
