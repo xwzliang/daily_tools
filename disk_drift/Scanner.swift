@@ -12,6 +12,11 @@ struct Snapshot: Codable {
     let date: Date
     let items: [String: Entry]
     let skipped: Int
+    var incompleteItems: Set<String>?
+
+    func isIncomplete(_ name: String) -> Bool {
+        incompleteItems?.contains(name) ?? (skipped > 0)
+    }
 }
 
 struct Change: Identifiable {
@@ -20,7 +25,9 @@ struct Change: Identifiable {
     let previous: Entry?
     var id: String { name }
     var bytes: Int64 { current?.bytes ?? 0 }
-    var delta: Int64 { bytes - (previous?.bytes ?? 0) }
+    let incomplete: Bool
+    let canCompare: Bool
+    var delta: Int64? { canCompare ? bytes - (previous?.bytes ?? 0) : nil }
 }
 
 enum Scan {
@@ -31,9 +38,14 @@ enum Scan {
         var rootInfo = stat()
         guard lstat(root.path, &rootInfo) == 0 else { throw POSIXError(.EACCES) }
         var skipped = 0
+        var incomplete = Set<String>()
         var items: [String: Entry] = [:]
         for child in children {
             try Task.checkCancellation()
+            let previousSkipped = skipped
+            defer {
+                if skipped > previousSkipped { incomplete.insert(child.lastPathComponent) }
+            }
             var info = stat()
             guard lstat(child.path, &info) == 0, info.st_dev == rootInfo.st_dev else { skipped += 1; continue }
             let isDirectory = (info.st_mode & S_IFMT) == S_IFDIR
@@ -60,13 +72,16 @@ enum Scan {
             }
             items[child.lastPathComponent] = Entry(bytes: bytes, directory: isDirectory)
         }
-        return Snapshot(root: root.path, date: Date(), items: items, skipped: skipped)
+        return Snapshot(root: root.path, date: Date(), items: items, skipped: skipped, incompleteItems: incomplete)
     }
 
     static func changes(_ current: Snapshot, from baseline: Snapshot?) -> [Change] {
         let prior = baseline?.items ?? [:]
-        return Set(current.items.keys).union(prior.keys).map {
-            Change(name: $0, current: current.items[$0], previous: prior[$0])
+        let names = Set(current.items.keys).union(prior.keys).union(current.incompleteItems ?? [])
+        return names.map { name in
+            let incomplete = current.isIncomplete(name)
+            return Change(name: name, current: current.items[name], previous: prior[name],
+                          incomplete: incomplete, canCompare: !incomplete && baseline?.isIncomplete(name) == false)
         }
     }
 }

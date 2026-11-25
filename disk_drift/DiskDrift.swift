@@ -27,8 +27,8 @@ private struct Inspector: View {
         return Scan.changes(document, from: baseline)
             .filter { search.isEmpty || $0.name.localizedStandardContains(search) }
             .sorted {
-                let left = order == .growth && baseline != nil ? $0.delta : $0.bytes
-                let right = order == .growth && baseline != nil ? $1.delta : $1.bytes
+                let left = order == .growth && baseline != nil ? $0.delta ?? Int64.min : $0.bytes
+                let right = order == .growth && baseline != nil ? $1.delta ?? Int64.min : $1.bytes
                 return left == right ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : left > right
             }
     }
@@ -58,15 +58,15 @@ private struct Inspector: View {
                 }.padding(.horizontal).padding(.vertical, 8)
                 Table(rows, selection: $selected) {
                     TableColumn("Item") { row in
-                        Label(row.name, systemImage: row.current == nil ? "minus.circle" :
+                        Label(row.name, systemImage: row.incomplete ? "exclamationmark.circle" : row.current == nil ? "minus.circle" :
                             row.current?.directory == true ? "folder" : "doc")
                     }
                     TableColumn("On disk") { row in
-                        Text(row.current == nil ? "Gone" : size(row.bytes)).monospacedDigit()
+                        Text(row.current == nil ? (row.incomplete ? "Unavailable" : "Gone") : (row.incomplete ? "≥ " : "") + size(row.bytes)).monospacedDigit()
                     }.width(min: 80, ideal: 105, max: 135)
                     TableColumn("Change") { row in
-                        Text(baseline == nil ? "—" : (row.delta > 0 ? "+" : "") + size(row.delta))
-                            .monospacedDigit().foregroundStyle(row.delta > 0 && baseline != nil ? .orange : .secondary)
+                        Text(row.delta.map { ($0 > 0 ? "+" : "") + size($0) } ?? "—")
+                            .monospacedDigit().foregroundStyle((row.delta ?? 0) > 0 ? .orange : .secondary)
                     }.width(min: 80, ideal: 105, max: 135)
                 }
                 HStack {
