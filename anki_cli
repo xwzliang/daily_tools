@@ -1,8 +1,14 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import sys
+import argparse
 import json
+import sys
+import urllib.error
 import urllib.request
+
+
+class AnkiError(Exception):
+    pass
 
 
 def request(action, **params):
@@ -10,39 +16,43 @@ def request(action, **params):
 
 
 def invoke(action, **params):
-    requestJson = json.dumps(request(action, **params)).encode("utf-8")
-    response = json.load(
-        urllib.request.urlopen(
-            urllib.request.Request("http://localhost:8765", requestJson)
-        )
+    payload = json.dumps(request(action, **params)).encode("utf-8")
+    http_request = urllib.request.Request(
+        "http://localhost:8765", payload, headers={"Content-Type": "application/json"}
     )
-    if len(response) != 2:
-        raise Exception("response has an unexpected number of fields")
-    if "error" not in response:
-        raise Exception("response is missing required error field")
-    if "result" not in response:
-        raise Exception("response is missing required result field")
+    with urllib.request.urlopen(http_request, timeout=30) as stream:
+        response = json.load(stream)
+    if not isinstance(response, dict) or "error" not in response or "result" not in response:
+        raise AnkiError("AnkiConnect returned an invalid response.")
     if response["error"] is not None:
-        raise Exception(response["error"])
+        raise AnkiError(str(response["error"]))
     return response["result"]
 
 
-# invoke('createDeck', deck='test1')
-# result = invoke('deckNames')
-# print('got list of decks: {}'.format(result))
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Call the local AnkiConnect API.")
+    parser.add_argument("action", nargs="?", default="deckNames")
+    parser.add_argument("parameters", metavar="KEY=VALUE", nargs="*")
+    args = parser.parse_args(argv)
+    params = {}
+    for item in args.parameters:
+        key, separator, value = item.partition("=")
+        if not separator or not key:
+            parser.error("parameters must use KEY=VALUE")
+        params[key] = value.split() if key in {"decks", "notes", "cards"} else value
+    try:
+        result = invoke(args.action, **params)
+    except urllib.error.HTTPError as error:
+        print(f"AnkiConnect returned HTTP {error.code}.", file=sys.stderr)
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+        print(f"AnkiConnect request failed: {error}", file=sys.stderr)
+    except (ValueError, AnkiError) as error:
+        print(f"AnkiConnect: {error}", file=sys.stderr)
+    else:
+        print(result)
+        return 0
+    return 1
+
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        action = sys.argv[1]
-        if len(sys.argv) > 2:
-            params = sys.argv[2:]
-            arg_dict = dict(arg.split("=") for arg in sys.argv[2:])
-            for key, value in arg_dict.items():
-                if key in ["decks", "notes", "cards"]:
-                    arg_dict[key] = value.split(" ")
-            results = invoke(action, **arg_dict)
-        else:
-            results = invoke(action)
-    else:
-        results = invoke("deckNames")
-    print(results)
+    sys.exit(main())
