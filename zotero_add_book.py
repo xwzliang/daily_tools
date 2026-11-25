@@ -3,12 +3,13 @@
 import os
 import pickle
 import re
+import shutil
+import tempfile
 import sys
 import urllib.request
 from pathlib import Path
 
-from bs4 import BeautifulSoup
-from pyzotero import zotero
+from daily_tools_lib.publication import move_without_overwrite
 
 
 def parse_person_name(persons_name):
@@ -23,6 +24,8 @@ def parse_person_name(persons_name):
 
 
 def extract_book_info(decode_html):
+    from bs4 import BeautifulSoup
+
     book_info = {}
     soup = BeautifulSoup(decode_html, "html.parser")
     meta = soup.find(name="title")
@@ -88,6 +91,8 @@ def extract_book_info(decode_html):
 
 
 def get_zot():
+    from pyzotero import zotero
+
     with open(Path(zotero_api_key_file_path).expanduser(), "r") as inf:
         library_id = inf.readline().strip()
         api_key = inf.readline().strip()
@@ -192,16 +197,13 @@ def create_book_template(zot, book_info):
     return book_template
 
 
-def create_book_item(zot, book_info):
-    book_template = create_book_template(zot, book_info)
-    resp = zot.create_items([book_template])
-    if "0" in resp["successful"]:
-        item_key = resp["successful"]["0"]["key"]
-        print(item_key)
-        return item_key
-    else:
-        # Create book failed
-        print(resp)
+def created_key(response, description):
+    saved = response.get("successful", {}).get("0", {})
+    if not saved.get("key"):
+        reason = response.get("failed", {}).get("0", {}).get("message", "missing item key")
+        raise RuntimeError(f"Could not create {description}: {reason}")
+    print(saved["key"])
+    return saved["key"]
 
 
 def set_pdf_name(book_info):
@@ -228,17 +230,21 @@ def set_pdf_name(book_info):
     else:
         pdf_name = "{}_{}.pdf".format(pdf_author, pdf_title)
     # return pdf_name.replace(" ", "_")
-    return pdf_name.replace("'", "_")
+    return pdf_name.replace("'", "_").replace("/", "_")
 
 
 def copy_pdf_to_dropbox(pdf_name):
-    pdf_path = (
-        os.popen('rm_invalid_chars "`newest {}/*.pdf`"'.format(book_dir)).read().strip()
-    )
-    target_pdf_path = "{}/{}".format(
-        dropbox_zotero_storage_dir, pdf_name.replace(" ", "\\ ")
-    )
-    os.system("cp '{}' {}".format(pdf_path, target_pdf_path))
+    directory = Path(book_dir).expanduser()
+    candidates = (path for path in directory.glob("*.pdf") if path.is_file())
+    source = max(candidates, key=lambda path: (path.stat().st_mtime_ns, path.name), default=None)
+    if source is None:
+        raise FileNotFoundError(f"No PDF found in {directory}")
+    destination = Path(dropbox_zotero_storage_dir).expanduser() / pdf_name
+    with tempfile.TemporaryDirectory(dir=destination.parent) as staging:
+        staged = Path(staging) / "book.pdf"
+        shutil.copy2(source, staged)
+        move_without_overwrite(staged, destination)
+    return destination
 
 
 def attach_pdf(zot, item_key, pdf_name):
@@ -260,11 +266,7 @@ def attach_pdf(zot, item_key, pdf_name):
     linked_file_template["contentType"] = "application/pdf"
     linked_file_template["title"] = pdf_name
     resp = zot.create_items([linked_file_template], item_key)
-    if "0" in resp["successful"]:
-        pdf_item_key = resp["successful"]["0"]["key"]
-        print(pdf_item_key)
-    else:
-        print(resp)
+    created_key(resp, "linked PDF for " + item_key)
 
 
 def get_linked_url():
@@ -291,21 +293,26 @@ def attach_link(zot, item_key, linked_url):
     linked_url_template["title"] = "Amazon.com Link"
     linked_url_template["url"] = linked_url
     resp = zot.create_items([linked_url_template], item_key)
-    if "0" in resp["successful"]:
-        link_item_key = resp["successful"]["0"]["key"]
-        print(link_item_key)
-    else:
-        print(resp)
+    created_key(resp, "linked URL for " + item_key)
 
 
 def zot_add_book(book_info):
     zot = get_zot()
-    item_key = create_book_item(zot, book_info)
+    template = create_book_template(zot, book_info)
+    linked_url = get_linked_url().strip()
+    if not linked_url:
+        raise ValueError("The linked URL is empty")
     pdf_name = set_pdf_name(book_info)
-    copy_pdf_to_dropbox(pdf_name)
-    attach_pdf(zot, item_key, pdf_name)
-    linked_url = get_linked_url()
-    attach_link(zot, item_key, linked_url)
+    destination = copy_pdf_to_dropbox(pdf_name)
+    try:
+        item_key = created_key(zot.create_items([template]), "book")
+        attach_pdf(zot, item_key, pdf_name)
+        attach_link(zot, item_key, linked_url)
+    except Exception as error:
+        raise RuntimeError(
+            f"Import interrupted. PDF saved at {destination}. "
+            f"Check Zotero for the book and its attachments before retrying. {error}"
+        ) from error
 
 
 def get_decode_html():
