@@ -65,5 +65,41 @@ before <c.red><b>赤</b> <c.unstyled>い</c></c> and <c.green>緑</c> after
             self.assertEqual(previous.read_bytes(), b"previous good subtitles")
 
 
+class TimedXMLTests(unittest.TestCase):
+    convert_xml = staticmethod(runpy.run_path(str(SCRIPT))["xml_to_srt"])
+
+    def test_multiline_namespaces_and_simultaneous_translations(self):
+        source = """<t:tt xmlns:t="http://www.w3.org/ns/ttml" xmlns:s="http://www.w3.org/ns/ttml#styling">
+          <t:head><t:styling><t:style xml:id="em" s:fontStyle="italic"/></t:styling>
+          <t:layout><t:region xml:id="top" s:displayAlign="before"/></t:layout></t:head>
+          <t:body><t:div begin="2s"><t:p end="1.5s" region="top" begin="0s">
+            A <t:span style="em">red</t:span> apple<t:br/>A &amp; B
+          </t:p><t:p begin="0s" dur="1500ms">红苹果</t:p>
+          <t:p begin="2s" end="4s">Next</t:p></t:div></t:body></t:tt>"""
+        self.assertEqual(self.convert_xml(source),
+                         "1\n00:00:02,000 --> 00:00:03,500\n{\\an8}A <i>red</i> apple\nA &amp; B\n红苹果\n\n"
+                         "2\n00:00:04,000 --> 00:00:06,000\nNext\n")
+
+    def test_fractional_frames_ticks_and_sequential_container(self):
+        source = """<tt xmlns:p="http://www.w3.org/ns/ttml#parameter" p:frameRate="30"
+                        p:frameRateMultiplier="1000 1001" p:tickRate="1000">
+                    <body><div timeContainer="seq">
+                    <p begin="00:00:00:15" dur="30f">frames</p>
+                    <p begin="500t" dur="1000ms">ticks</p>
+                    </div></body></tt>"""
+        self.assertEqual(self.convert_xml(source),
+                         "1\n00:00:00,500 --> 00:00:01,501\nframes\n\n"
+                         "2\n00:00:02,001 --> 00:00:03,001\nticks\n")
+
+    def test_legacy_tick_units_and_empty_document(self):
+        self.assertEqual(self.convert_xml("<tt><body><p begin='0' end='5000000'>First</p></body></tt>"),
+                         "1\n00:00:00,000 --> 00:00:00,500\nFirst\n")
+        self.assertEqual(self.convert_xml("<tt><body/></tt>"), "")
+
+    def test_clips_duration_to_parent_boundary(self):
+        source = "<tt><body begin='2s' end='4s'><p begin='1s' dur='5s'>X</p></body></tt>"
+        self.assertIn("00:00:03,000 --> 00:00:04,000", self.convert_xml(source))
+
+
 if __name__ == "__main__":
     unittest.main()

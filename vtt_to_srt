@@ -1,76 +1,15 @@
 #!/usr/bin/env python3
 
 import argparse
-import codecs
-import math
+from fractions import Fraction
+from html import escape
+from pathlib import Path
+import xml.etree.ElementTree as ET
 import os
 import re
 
 
 SUPPORTED_EXTENSIONS = [".xml", ".vtt"]
-
-
-def leading_zeros(value, digits=2):
-    value = "000000" + str(value)
-    return value[-digits:]
-
-
-def convert_time(raw_time):
-    if int(raw_time) == 0:
-        return "{}:{}:{},{}".format(0, 0, 0, 0)
-
-    ms = "000"
-    if len(raw_time) > 4:
-        ms = leading_zeros(int(raw_time[:-4]) % 1000, 3)
-    time_in_seconds = int(raw_time[:-7]) if len(raw_time) > 7 else 0
-    second = leading_zeros(time_in_seconds % 60)
-    minute = leading_zeros(int(math.floor(time_in_seconds / 60)) % 60)
-    hour = leading_zeros(int(math.floor(time_in_seconds / 3600)))
-    return "{}:{}:{},{}".format(hour, minute, second, ms)
-
-
-def xml_id_display_align_before(text):
-    """
-    displayAlign="before" means the current sub will be displayed on top.
-    That is and not at bottom. We check what's the xml:id associated to it
-    to have an {\an8} position tag in the output file.
-    """
-    align_before_re = re.compile('<region.*tts:displayAlign="before".*xml:id="(.*)"/>')
-    has_align_before = re.search(align_before_re, text)
-    if has_align_before:
-        return has_align_before.group(1)
-    return ""
-
-
-def xml_get_cursive_style_ids(text):
-    style_section = re.search("<styling>(.*)</styling>", text, flags=re.DOTALL)
-    if not style_section:
-        return []
-    style_ids_re = re.compile(
-        '<style.* tts:fontStyle="italic".* xml:id="([a-zA-Z0-9_.]+)"'
-    )
-    return [
-        re.search(style_ids_re, line).groups()[0]
-        for line in style_section.group().split("\n")
-        if re.search(style_ids_re, line)
-    ]
-
-
-def xml_cleanup_spans_start(span_id_re, cursive_ids, text):
-    has_cursive = []
-    span_start_tags = re.findall(span_id_re, text)
-    for s in span_start_tags:
-        has_cursive.append("<i>" if s[1] in cursive_ids else "")
-        text = has_cursive[-1].join(text.split(s[0], 1))
-    return text, has_cursive
-
-
-def xml_cleanup_spans_end(span_end_re, text, has_cursive):
-    span_end_tags = re.findall(span_end_re, text)
-    for s, cursive in zip(span_end_tags, has_cursive):
-        cursive = "</i>" if cursive else ""
-        text = cursive.join(text.split(s, 1))
-    return text
 
 
 def to_srt(text, extension):
@@ -154,71 +93,121 @@ def vtt_to_srt(text):
     return "\n\n".join(cues) + ("\n" if cues else "")
 
 
+def local_name(name):
+    return name.rsplit("}", 1)[-1]
+
+
+def xml_attrs(node):
+    return {local_name(key): value for key, value in node.attrib.items()}
+
+
+class SubtitleClock:
+    def __init__(self, root):
+        attrs = xml_attrs(root)
+        if attrs.get("timeBase", "media") != "media":
+            raise ValueError("This converter supports media-time subtitles.")
+        rate = Fraction(attrs.get("frameRate", "30"))
+        numerator, denominator = map(int, attrs.get("frameRateMultiplier", "1 1").split())
+        self.frames = rate * Fraction(numerator, denominator)
+        self.subframes = int(attrs.get("subFrameRate", "1"))
+        default_ticks = self.frames * self.subframes if "frameRate" in attrs else 1
+        self.ticks = Fraction(attrs.get("tickRate", default_ticks))
+        if min(self.frames, self.subframes, self.ticks) <= 0:
+            raise ValueError("Subtitle timing rates must be positive.")
+        # Legacy DFXP downloads store bare integers as 100-nanosecond ticks.
+        self.bare_ticks = self.ticks if "tickRate" in attrs else 10_000_000
+
+    def seconds(self, text):
+        if text.isdecimal():
+            return Fraction(int(text), self.bare_ticks)
+        offset = re.fullmatch(r"(\d+(?:\.\d+)?)(ms|h|m|s|f|t)", text)
+        if offset:
+            amount, unit = offset.groups()
+            factor = {"ms": Fraction(1, 1000), "h": 3600, "m": 60, "s": 1,
+                      "f": 1 / self.frames, "t": 1 / self.ticks}
+            return Fraction(amount) * factor[unit]
+        clock = re.fullmatch(r"(\d+):([0-5]\d):([0-5]\d)(?:\.(\d+)|:(\d+)(?:\.(\d+))?)?", text)
+        if not clock:
+            raise ValueError(f"Unsupported subtitle time {text!r}")
+        hours, minutes, seconds, decimal, frames, subframes = clock.groups()
+        whole = int(hours) * 3600 + int(minutes) * 60 + int(seconds)
+        if frames:
+            return whole + (int(frames) + Fraction(int(subframes or 0), self.subframes)) / self.frames
+        return whole + Fraction("0." + (decimal or "0"))
+
+
+def srt_stamp(seconds):
+    whole, milliseconds = divmod(int(seconds * 1000), 1000)
+    minutes, seconds = divmod(whole, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
+
+
 def xml_to_srt(text):
-    def append_subs(start, end, prev_content, format_time):
-        subs.append(
-            {
-                "start_time": convert_time(start) if format_time else start,
-                "end_time": convert_time(end) if format_time else end,
-                "content": "\n".join(prev_content),
-            }
-        )
+    root = ET.fromstring(text)
+    if local_name(root.tag) != "tt":
+        raise ValueError("Expected a timed-text document with a tt root.")
+    clock = SubtitleClock(root)
+    styles = {}
+    top_regions = set()
+    for node in root.iter():
+        attrs = xml_attrs(node)
+        if local_name(node.tag) == "style" and "id" in attrs:
+            styles[attrs["id"]] = attrs
+        if local_name(node.tag) == "region" and attrs.get("displayAlign") == "before":
+            top_regions.add(attrs.get("id"))
 
-    display_align_before = xml_id_display_align_before(text)
-    begin_re = re.compile("\s*<p begin=")
-    sub_lines = (l for l in text.split("\n") if re.search(begin_re, l))
-    subs = []
-    prev_time = {"start": 0, "end": 0}
-    prev_content = []
-    start = end = ""
-    start_re = re.compile('begin\="([0-9:\.]*)')
-    end_re = re.compile('end\="([0-9:\.]*)')
-    content_re = re.compile('">(.*)</p>')
+    def content(node):
+        parts = [escape(re.sub(r"\s+", " ", node.text or ""), quote=False)]
+        for child in node:
+            if local_name(child.tag) == "br":
+                parts.append("\n")
+            else:
+                if any(key in child.attrib for key in ("begin", "end", "dur")):
+                    raise ValueError("Timed inline text requires separate subtitle cues.")
+                parts.append(content(child))
+            parts.append(escape(re.sub(r"\s+", " ", child.tail or ""), quote=False))
+        payload = "".join(parts)
+        attrs = xml_attrs(node)
+        font = None
+        for ref in attrs.get("style", "").split():
+            font = styles.get(ref, {}).get("fontStyle", font)
+        if attrs.get("fontStyle", font) == "italic":
+            return "<i>" + payload + "</i>"
+        return payload
 
-    # some span tags are used for italics, we'll replace them by <i> and </i>,
-    # which is the standard for .srt files. We ignore all other uses.
-    cursive_ids = xml_get_cursive_style_ids(text)
-    span_id_re = re.compile('(<span style="([a-zA-Z0-9_.]+)">)+')
-    span_end_re = re.compile("(</span>)+")
-    br_re = re.compile("(<br\s*\/?>)+")
-    fmt_t = True
-    for s in sub_lines:
-        s, has_cursive = xml_cleanup_spans_start(span_id_re, cursive_ids, s)
+    cues = {}
 
-        string_region_re = r'<p(.*region="' + display_align_before + r'".*")>(.*)</p>'
-        s = re.sub(string_region_re, r"<p\1>{\\an8}\2</p>", s)
-        content = re.search(content_re, s).group(1)
+    def visit(node, reference, limit, region):
+        begin = reference + clock.seconds(node.get("begin", "0"))
+        ends = [limit] if limit is not None else []
+        if "end" in node.attrib:
+            ends.append(reference + clock.seconds(node.attrib["end"]))
+        if "dur" in node.attrib:
+            ends.append(begin + clock.seconds(node.attrib["dur"]))
+        end = min(ends) if ends else None
+        region = node.get("region", region)
+        if local_name(node.tag) == "p":
+            if end is None:
+                raise ValueError("Subtitle paragraph requires an end or duration.")
+            if begin < end:
+                payload = "\n".join(line.strip() for line in content(node).strip().split("\n"))
+                if payload:
+                    prefix = r"{\an8}" if region and region in top_regions else ""
+                    cues.setdefault((begin, end), []).append(prefix + payload)
+            return end
+        latest = begin
+        for child in node:
+            if local_name(child.tag) in ("body", "div", "p"):
+                start = latest if node.get("timeContainer") == "seq" else begin
+                latest = max(latest, visit(child, start, end, region))
+        return end if end is not None else latest
 
-        br_tags = re.search(br_re, content)
-        if br_tags:
-            content = "\n".join(content.split(br_tags.group()))
-
-        content = xml_cleanup_spans_end(span_end_re, content, has_cursive)
-
-        prev_start = prev_time["start"]
-        start = re.search(start_re, s).group(1)
-        end = re.search(end_re, s).group(1)
-        if len(start.split(":")) > 1:
-            fmt_t = False
-            start = start.replace(".", ",")
-            end = end.replace(".", ",")
-        if (prev_start == start and prev_time["end"] == end) or not prev_start:
-            # Fix for multiple lines starting at the same time
-            prev_time = {"start": start, "end": end}
-            prev_content.append(content)
-            continue
-        append_subs(prev_time["start"], prev_time["end"], prev_content, fmt_t)
-        prev_time = {"start": start, "end": end}
-        prev_content = [content]
-    append_subs(start, end, prev_content, fmt_t)
-
-    lines = (
-        "{}\n{} --> {}\n{}\n".format(
-            s + 1, subs[s]["start_time"], subs[s]["end_time"], subs[s]["content"]
-        )
-        for s in range(len(subs))
-    )
-    return "\n".join(lines)
+    visit(root, Fraction(0), None, None)
+    result = []
+    for index, ((begin, end), lines) in enumerate(sorted(cues.items()), 1):
+        result.append(f"{index}\n{srt_stamp(begin)} --> {srt_stamp(end)}\n" + "\n".join(lines))
+    return "\n\n".join(result) + ("\n" if result else "")
 
 
 def main():
@@ -244,13 +233,10 @@ def main():
         fn for fn in os.listdir(a.input) if fn[-4:].lower() in SUPPORTED_EXTENSIONS
     ]
     for fn in filenames:
-        with codecs.open("{}/{}".format(a.input, fn), "rb", "utf-8") as f:
-            text = f.read()
+        text = (Path(a.input) / fn).read_text(encoding="utf-8-sig")
         result = to_srt(text, fn[-4:])
-        with codecs.open(
-            "{}/{}.srt".format(a.output, fn.replace(".vtt", "")), "wb", "utf-8"
-        ) as f:
-            f.write(result)
+        name = fn.replace(".vtt", "") + ".srt"
+        (Path(a.output) / name).write_text(result, encoding="utf-8")
 
 
 if __name__ == "__main__":
