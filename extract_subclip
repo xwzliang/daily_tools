@@ -22,10 +22,12 @@ fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -s|--start)
+            [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || { echo "$1 requires a start time" >&2; exit 2; }
             start="$2"
             shift 2
             ;;
         -e|--end)
+            [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || { echo "$1 requires an end time" >&2; exit 2; }
             end="$2"
             shift 2
             ;;
@@ -63,7 +65,11 @@ if [[ -z "$output" ]]; then
 fi
 
 # ---- Build ffmpeg command ----
-ffmpeg_cmd=(ffmpeg -y -i "$input")
+if [[ -e "$output" || -L "$output" ]]; then
+    echo "Output already exists: $output" >&2
+    exit 1
+fi
+ffmpeg_cmd=(ffmpeg -nostdin -n -i "$input")
 
 if [[ -n "$start" ]]; then
     ffmpeg_cmd+=(-ss "$start")
