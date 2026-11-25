@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
-from ebook_to_pdf import epub_toc_options, convert_book, heading_toc_options, render_pdf
+from ebook_to_pdf import BookInbox, epub_toc_options, convert_book, heading_toc_options, render_pdf
 
 
 class TocFallbackTests(unittest.TestCase):
@@ -137,6 +137,57 @@ class SafeConversionTests(unittest.TestCase):
         with patch("ebook_to_pdf.render_pdf", side_effect=race), self.assertRaises(FileExistsError):
             convert_book(self.source, out)
         self.assertEqual((out / "第一_章.pdf").read_bytes(), b"first result")
+
+class BookInboxTests(unittest.TestCase):
+    def test_bursts_replacements_and_writes_in_progress(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            old = folder / "already there.txt"
+            old.write_text("existing")
+            inbox = BookInbox(folder)
+            self.assertEqual(inbox.ready(), [])
+            a, b = folder / "A.txt", folder / "B.EPUB"
+            old.unlink()
+            a.write_text("in progress")
+            b.write_text("complete")
+            (folder / "Other.pdf").write_text("output")
+            (folder / "partial.epub.part").write_text("unfinished")
+            (folder / "alias.epub").symlink_to(a)
+            (folder / ".hidden.epub").write_text("hidden")
+            self.assertEqual(inbox.ready(), [])
+            a.write_text("finally complete")
+            self.assertEqual([p for p, _ in inbox.ready()], [b])
+            self.assertEqual([p for p, _ in inbox.ready()], [a])
+            a.rename(folder / "normalized.txt")
+            self.assertEqual(inbox.ready(), [])
+            self.assertEqual(inbox.ready(), [])
+            old.write_text("replaced")
+            self.assertEqual(inbox.ready(), [])
+            self.assertEqual([p for p, _ in inbox.ready()], [old])
+
+    def test_simultaneous_complete_books(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            inbox = BookInbox(folder)
+            for name in ["c.txt", "a.txt", "b.txt"]:
+                (folder / name).write_text(name)
+            self.assertEqual(inbox.ready(), [])
+            self.assertEqual([p.name for p, _ in inbox.ready()], ["a.txt", "b.txt", "c.txt"])
+            self.assertEqual(inbox.ready(), [])
+
+    def test_changed_input_not_published(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            source = folder / "book.txt"
+            source.write_text("first revision")
+            def render(src, staged):
+                Path(staged).write_bytes(b"%PDF-test")
+                Path(src).write_text("new revision while converting")
+            with patch("ebook_to_pdf.render_pdf", side_effect=render), self.assertRaisesRegex(OSError, "Input changed"):
+                convert_book(source, folder / "out")
+            self.assertEqual(list((folder / "out").iterdir()), [])
+            self.assertEqual(source.read_text(), "new revision while converting")
+
 
 if __name__ == '__main__':
     unittest.main()

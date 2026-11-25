@@ -6,6 +6,8 @@ import errno
 import sys
 import shutil
 import tempfile
+import stat
+import time
 from pathlib import Path
 import os
 import re
@@ -238,9 +240,14 @@ def move_without_overwrite(source, destination):
     os.unlink(source)
 
 
+def file_revision(info):
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
 def convert_book(ebook, output_dir=None, dry_run=False):
     """Publish a complete PDF without clobbering an existing destination."""
     source = Path(ebook)
+    revision = file_revision(source.stat())
     cleaned = Path(clean_ebook_filename(str(source), preserve_unicode=output_dir is not None))
     rename = output_dir is None and cleaned != source
     destination = (Path(output_dir) / cleaned.name if output_dir is not None else cleaned).with_suffix(".pdf")
@@ -270,6 +277,8 @@ def convert_book(ebook, output_dir=None, dry_run=False):
                 render_pdf(str(source), str(staged))
             if not staged.is_file() or staged.stat().st_size == 0:
                 raise OSError(f"Converter produced an empty PDF for {source}")
+            if file_revision(source.stat()) != revision:
+                raise OSError(f"Input changed during conversion: {source}")
             move_without_overwrite(staged, destination)
     if rename:
         # Preserve legacy normalized names without replacing another input.
@@ -277,12 +286,84 @@ def convert_book(ebook, output_dir=None, dry_run=False):
     print(f"Ready: {destination}")
 
 
+# Restrict unattended intake to Calibre book and document formats. Explicit
+# file arguments still go directly to the installed converter.
+WATCH_EXTENSIONS = frozenset("""
+    azw azw1 azw3 azw4 cb7 cbr cbz chm djvu docx epub fb2 fbz html htm htmlz
+    kepub lit lrf mobi odt pdb pml pmlz prc rb rtf snb tcr txt txtz xhtml
+""".split())
+
+
+def incoming_books(folder):
+    revisions = {}
+    with os.scandir(folder) as entries:
+        for entry in entries:
+            ext = Path(entry.name).suffix.lower().lstrip(".")
+            if entry.name.startswith(".") or ext not in WATCH_EXTENSIONS:
+                continue
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                revisions[Path(entry.path)] = file_revision(info)
+    return revisions
+
+
+class BookInbox:
+    """Track arrivals by revision and wait for two matching observations."""
+
+    def __init__(self, folder):
+        self.folder = folder
+        self.previous = incoming_books(folder)
+        self.handled = set(self.previous.values())
+
+    def ready(self):
+        current = incoming_books(self.folder)
+        self.handled.intersection_update(current.values())
+        ready = []
+        for path, revision in sorted(current.items()):
+            if revision[2] and self.previous.get(path) == revision and revision not in self.handled:
+                ready.append((path, revision))
+                self.handled.add(revision)
+        self.previous = current
+        return ready
+
+
+def watch_books(folder, output_dir=None, dry_run=False):
+    inbox = BookInbox(folder)
+    print(f"Watching {folder} for new ebooks. Press Ctrl-C to stop.", flush=True)
+    try:
+        while True:
+            time.sleep(2)
+            for path, revision in inbox.ready():
+                try:
+                    if file_revision(path.lstat()) == revision:
+                        convert_book(path, output_dir, dry_run)
+                except (OSError, subprocess.CalledProcessError) as error:
+                    print(f"Skipped {path}: {error}", file=sys.stderr)
+    except KeyboardInterrupt:
+        return 0
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Convert ebooks with Calibre, preserving useful EPUB navigation.")
+    parser = argparse.ArgumentParser(
+        description="Convert ebooks with Calibre, preserving useful EPUB navigation.",
+        epilog="Example: ebook_to_pdf.py --watch-dir incoming --output-dir PDFs. "
+               "Existing books form the starting baseline. New and changed files "
+               "are queued after two matching checks. An occupied output is skipped.",
+    )
     parser.add_argument("--output-dir", type=Path, help="write PDFs here and keep source files in place")
+    parser.add_argument("--watch-dir", type=Path, help="watch a folder for new or changed ebooks after startup")
     parser.add_argument("--dry-run", action="store_true", help="show output paths without writing or converting")
     parser.add_argument("books", nargs="*", help="files or quoted glob patterns; no arguments watches the current directory")
     args = parser.parse_args()
+    if args.watch_dir is not None:
+        if args.books:
+            parser.error("--watch-dir cannot be combined with explicit files")
+        if not args.watch_dir.is_dir():
+            parser.error("--watch-dir must be an existing folder")
+        return watch_books(args.watch_dir.resolve(), args.output_dir, args.dry_run)
     if args.books:
         failures = 0
         seen = set()
@@ -305,28 +386,7 @@ def main():
         return int(failures > 0)
     elif args.output_dir is not None or args.dry_run:
         parser.error("specify at least one input file or pattern")
-    else:
-        import time
-
-        cwd = os.getcwd()
-        old_list_of_files = os.listdir(cwd)
-
-        while True:  # Monitor the cwd
-            time.sleep(2)
-            new_list_of_files = os.listdir(cwd)
-            if len(new_list_of_files) > len(old_list_of_files):  # New file added
-                # get the latest file as ebook
-                ebook = max(new_list_of_files, key=os.path.getctime)
-                if (
-                    ".pdf" not in ebook and ".jpg" not in ebook
-                ):  # Don't convert pdf file and jpg
-                    try:
-                        convert_book(ebook)
-                    except (OSError, subprocess.CalledProcessError) as error:
-                        print(f"Skipped {ebook}: {error}", file=sys.stderr)
-                    time.sleep(2)
-            # Update the list of files
-            old_list_of_files = os.listdir(cwd)
+    return watch_books(Path.cwd())
 
 
 if __name__ == "__main__":
