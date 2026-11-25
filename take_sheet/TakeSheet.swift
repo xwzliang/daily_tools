@@ -14,27 +14,105 @@ private struct Playback: Identifiable {
     let id = UUID()
     let url: URL
     let start: Double
+    let revision: String
 }
 
 private struct Screening: View {
     let playback: Playback
     @State private var player: AVPlayer?
+    @State private var store: ClipNotes?
+    @State private var notes: [ReviewNote] = []
+    @State private var draft: ReviewNote?
+    @State private var text = ""
+    @State private var problem: String?
+    @FocusState private var typing: Bool
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Text(playback.url.lastPathComponent).lineLimit(1)
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Done") { dismiss() }.disabled(draft != nil)
             }.padding()
-            VideoPlayer(player: player)
-        }.frame(minWidth: 640, minHeight: 400)
+            VideoPlayer(player: player).frame(minHeight: 240)
+            Divider()
+            HStack {
+                Button("Mark Frame", action: beginNote).disabled(store == nil || draft != nil)
+                Spacer()
+                Button("Copy Notes") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(ClipNotes.text(for: playback.url, notes: notes), forType: .string)
+                }.disabled(notes.isEmpty)
+            }.padding(.horizontal).padding(.vertical, 8)
+            if let draft {
+                HStack {
+                    Text(Media.timecode(draft.seconds)).monospacedDigit()
+                    TextField("Review note", text: $text).focused($typing).onSubmit(save)
+                    Button("Cancel") { self.draft = nil; text = "" }
+                    Button("Save Note", action: save).disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.padding(.horizontal).padding(.bottom, 8)
+            }
+            if !notes.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(notes) { note in
+                            HStack(alignment: .firstTextBaseline) {
+                                Button(Media.timecode(note.seconds)) { seek(note.seconds) }.monospacedDigit()
+                                Text(note.text).textSelection(.enabled)
+                                Spacer()
+                                Button("Edit") { edit(note) }.disabled(draft != nil)
+                            }
+                        }
+                    }.padding(.horizontal).padding(.vertical, 4)
+                }.frame(maxHeight: 130)
+            }
+            if let problem { Text(problem).foregroundStyle(.orange).padding(.horizontal) }
+        }.frame(minWidth: 640, minHeight: 460)
+        .interactiveDismissDisabled(draft != nil)
         .onAppear {
             let video = AVPlayer(url: playback.url)
             player = video
+            do {
+                let storage = try ClipNotes(folder: playback.url.deletingLastPathComponent(), revision: playback.revision)
+                notes = try storage.fetch()
+                store = storage
+            } catch { problem = error.localizedDescription }
             video.seek(to: CMTime(seconds: playback.start, preferredTimescale: 600),
                        toleranceBefore: .zero, toleranceAfter: .zero)
         }.onDisappear { player?.pause(); player = nil }
+    }
+
+    private func seek(_ time: Double) {
+        player?.pause()
+        player?.seek(to: CMTime(seconds: time, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func beginNote() {
+        guard let player, player.currentTime().seconds.isFinite else { return }
+        player.pause()
+        draft = ReviewNote(id: UUID(), seconds: max(0, player.currentTime().seconds), text: "")
+        text = ""
+        typing = true
+    }
+
+    private func edit(_ note: ReviewNote) {
+        seek(note.seconds)
+        draft = note
+        text = note.text
+        typing = true
+    }
+
+    private func save() {
+        guard let store, let draft else { return }
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        do {
+            try store.save(ReviewNote(id: draft.id, seconds: draft.seconds, text: value))
+            notes = try store.fetch()
+            self.draft = nil
+            text = ""
+            problem = nil
+        } catch { problem = error.localizedDescription }
     }
 }
 
@@ -131,7 +209,7 @@ private struct TakeBrowser: View {
                 HStack(spacing: 6) {
                     ForEach(take.frames) { frame in
                         Button {
-                            playback = Playback(url: take.url, start: frame.time)
+                            playback = Playback(url: take.url, start: frame.time, revision: take.revision)
                         } label: {
                             ZStack(alignment: .bottomLeading) {
                                 Color.black

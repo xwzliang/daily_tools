@@ -7,3 +7,5 @@ Open a folder to see frames near 12%, 50% and 88% of each clip, with its duratio
 The app reads the immediate children of the chosen folder, uses macOS media decoders, and applies the source display transform. Very short clips may yield fewer than three distinct frames. Unsupported clips stay visible with a status message. Audio status shows whether an audio track exists.
 
 Selects are stored separately under `~/Library/Application Support/Take Sheet`. A replacement file with a different size or modification time gets a new identity. You can reopen a folder from Terminal with `open -a "Take Sheet" /path/to/renders`.
+
+While reviewing a frame, choose **Mark Frame** to pause at the current playhead and attach a note. Click a saved timestamp to revisit it. **Edit** preserves its timestamp, and **Copy Notes** copies the clip name and ordered timecoded notes. Notes are stored per clip revision under the app’s Application Support folder.
