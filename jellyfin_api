@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Defaults (can also be overridden via flags)
 JELLYFIN_URL="${JELLYFIN_URL:-http://imac.local:8096}"
-TOKEN="${JELLYFIN_TOKEN:-8ff4ba42ecee43a5a1f804dfd692783b}"      # or pass via --token
+TOKEN="${JELLYFIN_TOKEN:-}"
+unset JELLYFIN_TOKEN
 USER_ID="${JELLYFIN_USER_ID:-96314c178beb4d41a1b5bf251bcf6fff}"  # or pass via --user
 
 SERIES_ID=""
@@ -54,13 +55,13 @@ ENV OVERRIDES:
 
 EXAMPLES:
   Mark E1–E50 of S1 watched (by ID):
-    jellyfin_api -s d35f...70d2 -n 1 -a 1 -b 50 -t <TOKEN> -U <USER_ID>
+    jellyfin_api -s d35f...70d2 -n 1 -a 1 -b 50 -U <USER_ID>
 
   Mark by series name keyword:
-    jellyfin_api -q "One Piece" -n 1 -a 1 -b 50 -t <TOKEN> -U <USER_ID>
+    jellyfin_api -q "One Piece" -n 1 -a 1 -b 50 -U <USER_ID>
 
   Unwatch a single episode:
-    jellyfin_api -s d35f...70d2 -n 1 -a 582 -b 582 --unwatch -t <TOKEN> -U <USER_ID>
+    jellyfin_api -s d35f...70d2 -n 1 -a 582 -b 582 --unwatch -U <USER_ID>
 EOF
 }
 
@@ -89,7 +90,12 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "Error: 'jq' is required." >&2; exit 1
 fi
 
-for var in JELLYFIN_URL TOKEN USER_ID SEASON START_EP END_EP; do
+if [[ -z "$TOKEN" || "$TOKEN" == *$'\r'* || "$TOKEN" == *$'\n'* ]]; then
+  echo "Set JELLYFIN_TOKEN to a single-line Jellyfin API token." >&2
+  exit 1
+fi
+
+for var in JELLYFIN_URL USER_ID SEASON START_EP END_EP; do
   if [[ -z "${!var:-}" ]]; then
     echo "Error: $var is required." >&2; usage; exit 1
   fi
@@ -103,12 +109,15 @@ if [[ "$START_EP" -gt "$END_EP" ]]; then
   echo "Error: --start must be <= --end" >&2; exit 1
 fi
 
-AUTH_H="X-MediaBrowser-Token: $TOKEN"
+# curl reads the header from stdin so the token stays out of its argument list.
+jellyfin_request() {
+  printf 'X-MediaBrowser-Token: %s\n' "$TOKEN" | curl -H @- "$@"
+}
 
 # --- Resolve SERIES_ID from query, if needed ---
 if [[ -z "$SERIES_ID" ]]; then
   log "Resolving series by query: $SERIES_QUERY"
-  CURL_ARGS=( -fsS -G -H "$AUTH_H" "$JELLYFIN_URL/Users/$USER_ID/Items"
+  CURL_ARGS=( -fsS -G "$JELLYFIN_URL/Users/$USER_ID/Items"
               --data-urlencode "IncludeItemTypes=Series"
               --data-urlencode "Recursive=true"
               --data-urlencode "Fields=Id,Name,ProductionYear"
@@ -117,7 +126,7 @@ if [[ -z "$SERIES_ID" ]]; then
   if [[ -n "$LIBRARY_ID" ]]; then
     CURL_ARGS+=( --data-urlencode "ParentId=$LIBRARY_ID" )
   fi
-  SEARCH_JSON=$(curl "${CURL_ARGS[@]}")
+  SEARCH_JSON=$(jellyfin_request "${CURL_ARGS[@]}")
   TOTAL=$(echo "$SEARCH_JSON" | jq '.Items | length')
   if [[ "$TOTAL" -eq 0 ]]; then
     echo "No series found for query: \"$SERIES_QUERY\" (check spelling/library filter?)" >&2
@@ -146,7 +155,7 @@ log "Series: $SERIES_ID | Season: $SEASON | Range: $START_EP..$END_EP"
 log "User: $USER_ID | Mode: $([[ $UNWATCH -eq 1 ]] && echo UNWATCH || echo WATCH)"
 
 # --- Resolve the season ID (more reliable than /Shows/{id}/Episodes) ---
-SEASONS_JSON=$(curl -fsS -H "$AUTH_H" "$JELLYFIN_URL/Shows/$SERIES_ID/Seasons?userId=$USER_ID")
+SEASONS_JSON=$(jellyfin_request -fsS "$JELLYFIN_URL/Shows/$SERIES_ID/Seasons?userId=$USER_ID")
 SEASON_ID=$(echo "$SEASONS_JSON" | jq -r --argjson n "$SEASON" '.Items[] | select(.IndexNumber == $n) | .Id')
 
 if [[ -z "$SEASON_ID" || "$SEASON_ID" == "null" ]]; then
@@ -159,7 +168,7 @@ log "SeasonId: $SEASON_ID"
 
 # --- Fetch episodes under the season (stable route) ---
 EP_IDS=$(
-  curl -fsS -H "$AUTH_H" \
+  jellyfin_request -fsS \
     "$JELLYFIN_URL/Users/$USER_ID/Items?ParentId=$SEASON_ID&IncludeItemTypes=Episode&Fields=Id,IndexNumber&SortBy=IndexNumber&Recursive=false" \
   | jq -r ".Items[] | select(.IndexNumber >= $START_EP and .IndexNumber <= $END_EP) | .Id"
 )
@@ -177,11 +186,11 @@ while IFS= read -r EP_ID; do
     echo "(dry-run) Would $([[ $UNWATCH -eq 1 ]] && echo UNWATCH || echo WATCH) $EP_ID"
   else
     if [[ "$UNWATCH" -eq 1 ]]; then
-      curl -fsS -X DELETE -H "$AUTH_H" \
+      jellyfin_request -fsS -X DELETE \
         "$JELLYFIN_URL/Users/$USER_ID/PlayedItems/$EP_ID" >/dev/null
       echo "Unwatched $EP_ID"
     else
-      curl -fsS -X POST -H "$AUTH_H" \
+      jellyfin_request -fsS -X POST \
         "$JELLYFIN_URL/Users/$USER_ID/PlayedItems/$EP_ID" >/dev/null
       echo "Marked $EP_ID as played"
     fi
