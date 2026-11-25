@@ -42,7 +42,7 @@ final class FinderModel: ObservableObject {
         } catch { status = error.localizedDescription }
     }
 
-    func refresh() {
+    func refresh(recognizeScans: Bool = false) {
         guard let library else { return }
         let ticket = UUID()
         scanID = ticket
@@ -50,7 +50,7 @@ final class FinderModel: ObservableObject {
         status = "Looking for PDFs…"
         scanTask = Task.detached { [weak self] in
             do {
-                let summary = try library.refresh { path, _ in
+                let summary = try library.refresh(recognizeScans: recognizeScans) { path, _ in
                     Task { @MainActor [weak self] in
                         guard let self, self.scanID == ticket, self.scanning else { return }
                         self.status = "Indexing " + path
@@ -134,6 +134,7 @@ struct BookPage: NSViewRepresentable {
 struct FinderScreen: View {
     @ObservedObject var model: FinderModel
     @State private var issuesOpen = false
+    @State private var confirmOCR = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -146,7 +147,12 @@ struct FinderScreen: View {
                 Button("Choose Folder…") { model.choose() }.keyboardShortcut("o")
                 if model.library != nil {
                     if model.scanning { Button("Cancel Scan") { model.cancel() } }
-                    else { Button("Refresh") { model.refresh() }.keyboardShortcut("r") }
+                    else {
+                        Button("Refresh") { model.refresh() }.keyboardShortcut("r")
+                        Menu("Scan Options") {
+                            Button("Recognize Text on Scanned Pages…") { confirmOCR = true }
+                        }.fixedSize()
+                    }
                 }
             }.padding()
             Divider()
@@ -161,7 +167,7 @@ struct FinderScreen: View {
                             .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
                         List(model.hits, selection: $model.selected) { hit in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(hit.path + " · p. \(hit.page)").font(.headline).lineLimit(2)
+                                Text(hit.path + " · p. \(hit.page)" + (hit.recognized ? " · OCR" : "")).font(.headline).lineLimit(2)
                                 Text(hit.clip).font(.callout).lineLimit(3)
                             }.padding(.vertical, 4).tag(hit.id)
                         }
@@ -201,6 +207,11 @@ struct FinderScreen: View {
                 }
             }.font(.caption).foregroundStyle(.secondary).padding(10)
         }.frame(minWidth: 730, minHeight: 460)
+        .confirmationDialog("Recognize text on scanned pages?", isPresented: $confirmOCR) {
+            Button("Recognize Text") { model.refresh(recognizeScans: true) }
+        } message: {
+            Text("Page Finder will read image-only pages on this Mac using English and Chinese recognition. Large books may take several minutes.")
+        }
     }
 
     var emptyMessage: String {

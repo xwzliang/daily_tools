@@ -16,6 +16,7 @@ struct PageHit: Identifiable {
     let path: String
     let page: Int
     let clip: String
+    let recognized: Bool
     var id: String { "\(page):" + path }
 }
 
@@ -46,7 +47,7 @@ struct Library {
         return (Int64(info.st_size), Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec))
     }
 
-    func refresh(progress: (String, ScanSummary) -> Void = { _, _ in }) throws -> ScanSummary {
+    func refresh(recognizeScans: Bool = false, progress: (String, ScanSummary) -> Void = { _, _ in }) throws -> ScanSummary {
         let lock = open(index.path + ".lock", O_CREAT | O_WRONLY, 0o600)
         guard lock >= 0 else { throw LibraryError("Could not open the index lock.") }
         defer { close(lock) }
@@ -62,7 +63,8 @@ struct Library {
                 complete = false; summary.skipped += 1; return true
             }) else { throw LibraryError("Could not scan the selected folder.") }
 
-        let lookup = try db.statement("SELECT size, modified, issue FROM documents WHERE path=?")
+        let recognizer = try recognizeScans ? PageOCR() : nil
+        let lookup = try db.statement("SELECT size, modified, issue, ocr_checked, pages, extracted FROM documents WHERE path=?")
         let base = root.path.hasSuffix("/") ? root.path : root.path + "/"
         for case let url as URL in walk {
             try Task.checkCancellation()
@@ -79,14 +81,22 @@ struct Library {
             summary.discovered += 1
             let current = try stamp(url)
             try lookup.bind([.text(relative)])
-            if try lookup.next(), lookup.integer(0) == current.size, lookup.integer(1) == current.modified {
+            if try lookup.next(), lookup.integer(0) == current.size, lookup.integer(1) == current.modified,
+               !recognizeScans || lookup.integer(3) != 0 || lookup.integer(4) == lookup.integer(5) {
                 summary.reused += 1
                 if !lookup.text(2).isEmpty { summary.unsearchable += 1 }
                 continue
             }
             progress(relative, summary)
             let issue = try autoreleasepool {
-                try indexDocument(url, relative: relative, before: current, db: db)
+                var lastReport = ProcessInfo.processInfo.systemUptime
+                return try indexDocument(url, relative: relative, before: current, db: db, recognizer: recognizer) { page, total in
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if now - lastReport >= 1 {
+                        progress(relative + " · page " + String(page) + " of " + String(total), summary)
+                        lastReport = now
+                    }
+                }
             }
             if !issue.isEmpty { summary.unsearchable += 1 }
             summary.updated += 1
@@ -108,7 +118,7 @@ struct Library {
         return summary
     }
 
-    private func indexDocument(_ url: URL, relative: String, before: (size: Int64, modified: Int64), db: Database) throws -> String {
+    private func indexDocument(_ url: URL, relative: String, before: (size: Int64, modified: Int64), db: Database, recognizer: PageOCR?, pageProgress: (Int, Int) -> Void) throws -> String {
         let pdf = PDFDocument(url: url)
         var issue = ""
         if pdf == nil { issue = "Unreadable PDF" }
@@ -123,21 +133,27 @@ struct Library {
             guard try add.next() else { throw LibraryError("Could not add the book.") }
             let id = add.integer(0)
             try add.next()
-            let page = try db.statement("INSERT INTO pages(document, number, body, normalized) VALUES(?,?,?,?)")
+            let page = try db.statement("INSERT INTO pages(document, number, body, normalized, recognized) VALUES(?,?,?,?,?)")
             for number in 0..<count {
                 try Task.checkCancellation()
+                pageProgress(number + 1, count)
                 try autoreleasepool {
-                    let text = Self.clean(pdf?.page(at: number)?.string ?? "")
+                    guard let source = pdf?.page(at: number) else { return }
+                    var text = Self.clean(source.string ?? "")
+                    let needsRecognition = text.isEmpty && recognizer != nil
+                    if needsRecognition, let recognizer {
+                        text = Self.clean(try recognizer.read(source))
+                    }
                     if !text.isEmpty {
-                        try page.bind([.integer(id), .integer(Int64(number + 1)), .text(text), .text(Self.key(text))])
+                        try page.bind([.integer(id), .integer(Int64(number + 1)), .text(text), .text(Self.key(text)), .integer(needsRecognition ? 1 : 0)])
                         try page.next()
                         extracted += 1
                     }
                 }
             }
-            if issue.isEmpty && extracted == 0 { issue = "No text layer" }
-            let status = try db.statement("UPDATE documents SET extracted=?, issue=? WHERE id=?")
-            try status.bind([.integer(Int64(extracted)), .text(issue), .integer(id)]); try status.next()
+            if issue.isEmpty && extracted == 0 { issue = recognizer == nil ? "No text layer" : "No text recognized" }
+            let status = try db.statement("UPDATE documents SET extracted=?, issue=?, ocr_checked=? WHERE id=?")
+            try status.bind([.integer(Int64(extracted)), .text(issue), .integer(recognizer == nil ? 0 : 1), .integer(id)]); try status.next()
             guard try stamp(url) == before else { throw LibraryError("The book changed during scanning. Refresh to retry.") }
         }
         return issue
@@ -150,7 +166,7 @@ struct Library {
         let query: Statement
         if needle.unicodeScalars.count >= 3 {
             query = try db.statement("""
-                SELECT d.path, p.number, p.body FROM words JOIN pages p ON p.id=words.rowid
+                SELECT d.path, p.number, p.body, p.recognized FROM words JOIN pages p ON p.id=words.rowid
                 JOIN documents d ON d.id=p.document WHERE words MATCH ?
                 ORDER BY rank, d.path, p.number LIMIT ?
                 """)
@@ -158,7 +174,7 @@ struct Library {
             try query.bind([.text(literal), .integer(Int64(limit))])
         } else {
             query = try db.statement("""
-                SELECT d.path, p.number, p.body FROM pages p JOIN documents d ON p.document=d.id
+                SELECT d.path, p.number, p.body, p.recognized FROM pages p JOIN documents d ON p.document=d.id
                 WHERE instr(p.normalized,?)>0 ORDER BY d.path,p.number LIMIT ?
                 """)
             try query.bind([.text(needle), .integer(Int64(limit))])
@@ -172,7 +188,7 @@ struct Library {
             let start = body.index(position, offsetBy: -52, limitedBy: body.startIndex) ?? body.startIndex
             let end = body.index(start, offsetBy: 210, limitedBy: body.endIndex) ?? body.endIndex
             let snippet = (start == body.startIndex ? "" : "…") + body[start..<end] + (end == body.endIndex ? "" : "…")
-            hits.append(PageHit(path: query.text(0), page: Int(query.integer(1)), clip: String(snippet)))
+            hits.append(PageHit(path: query.text(0), page: Int(query.integer(1)), clip: String(snippet), recognized: query.integer(3) != 0))
         }
         return hits
     }

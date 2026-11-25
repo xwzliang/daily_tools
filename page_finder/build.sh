@@ -11,7 +11,7 @@ trap 'rm -rf "$stage"' EXIT
 app="$stage/Page Finder.app"
 mkdir -p "$app/Contents/MacOS"
 mac_arch=$(uname -m)
-xcrun swiftc -O -parse-as-library -target "${mac_arch}-apple-macos13.0" Database.swift Library.swift PageFinder.swift -o "$app/Contents/MacOS/PageFinder"
+xcrun swiftc -O -parse-as-library -target "${mac_arch}-apple-macos13.0" Database.swift PageOCR.swift Library.swift PageFinder.swift -o "$app/Contents/MacOS/PageFinder"
 cp Info.plist "$app/Contents/Info.plist"
 codesign --force --sign - "$app"
 codesign --verify --strict "$app"

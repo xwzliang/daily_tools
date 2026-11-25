@@ -64,8 +64,19 @@ final class Database {
         if !readOnly {
             try execute("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;")
             let version = try statement("PRAGMA user_version")
-            guard try version.next(), version.integer(0) <= 1 else { throw LibraryError("This index was created by a newer Page Finder.") }
-            if version.integer(0) == 0 { try createSchema() }
+            guard try version.next(), version.integer(0) <= 2 else { throw LibraryError("This index was created by a newer Page Finder.") }
+            let existing = version.integer(0)
+            try version.next()
+            if existing == 0 { try createSchema() }
+            if existing <= 1 {
+                try transaction {
+                    try execute("""
+                        ALTER TABLE documents ADD COLUMN ocr_checked INTEGER NOT NULL DEFAULT 0;
+                        ALTER TABLE pages ADD COLUMN recognized INTEGER NOT NULL DEFAULT 0;
+                        PRAGMA user_version=2;
+                        """)
+                }
+            }
         }
     }
     deinit { sqlite3_close_v2(handle) }

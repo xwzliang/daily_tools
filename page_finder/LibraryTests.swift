@@ -15,6 +15,29 @@ private func makeBook(_ url: URL, _ pages: [String]) throws {
     context.closePDF()
 }
 
+private func makeScan(_ url: URL) throws {
+    let width = 1200, height = 400
+    guard let image = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw LibraryError("Image fixture failed") }
+    let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+    image.setFillColor(gray: 1, alpha: 1)
+    image.fill(bounds)
+    image.textPosition = CGPoint(x: 50, y: 215)
+    let line = NSAttributedString(string: "The winter orchard is blooming", attributes: [
+        .font: NSFont.systemFont(ofSize: 55), .foregroundColor: NSColor.black
+    ])
+    CTLineDraw(CTLineCreateWithAttributedString(line), image)
+    var page = bounds
+    guard let raster = image.makeImage(), let pdf = CGContext(url as CFURL, mediaBox: &page, nil) else {
+        throw LibraryError("Scanned PDF fixture failed")
+    }
+    pdf.beginPDFPage(nil)
+    pdf.draw(raster, in: bounds)
+    pdf.endPDFPage()
+    pdf.closePDF()
+}
+
 @main struct LibraryTests {
     static func expect(_ message: String, _ predicate: @autoclosure () throws -> Bool) throws {
         guard try predicate() else { throw LibraryError(message) }
@@ -34,6 +57,12 @@ private func makeBook(_ url: URL, _ pages: [String]) throws {
         let lib = try Library(folder: books, storage: temp.appendingPathComponent("Index"))
         let first = try lib.refresh()
         try expect("Discovery or text layer counts: \(first) \(try lib.overview())", first.updated == 2 && first.unsearchable == 1)
+        // Recreate the public 1.0 schema around actual indexed documents.
+        do {
+            let old = try Database(lib.index)
+            try old.execute("ALTER TABLE documents DROP COLUMN ocr_checked; ALTER TABLE pages DROP COLUMN recognized; PRAGMA user_version=1;")
+        }
+        try expect("Upgrade retained old books", lib.refresh().reused == 2)
         try expect("Original modified", Data(contentsOf: source) == before)
         try expect("Case and accent folding", lib.search("CAFE").map(\.page) == [1])
         try expect("Short CJK query", lib.search("图书").map(\.page) == [2])
@@ -52,6 +81,18 @@ private func makeBook(_ url: URL, _ pages: [String]) throws {
         do { _ = try lib.refresh(); throw LibraryError("Missing library accepted") }
         catch let error as LibraryError where error.errorDescription == "The library folder is unavailable." {}
         try expect("Offline folder retained its index", lib.search("revision").count == 1)
-        print("Passed PDF discovery, extraction, literal search, incremental updates, and offline retention.")
+        try FileManager.default.createDirectory(at: books, withIntermediateDirectories: true)
+        let scan = books.appendingPathComponent("Scan.pdf")
+        try makeScan(scan)
+        let imageSource = try Data(contentsOf: scan)
+        _ = try lib.refresh()
+        try expect("OCR must be explicitly enabled", lib.search("winter orchard").isEmpty)
+        try expect("OCR processed the image-only book", lib.refresh(recognizeScans: true).updated == 1)
+        let matches = try lib.search("winter orchard")
+        try expect("Recognized page and provenance", matches.count == 1 && matches[0].page == 1 && matches[0].recognized)
+        try expect("OCR cache reused", lib.refresh(recognizeScans: true).reused == 1)
+        try expect("Normal refresh retains recognition", lib.refresh().reused == 1 && lib.search("winter orchard").count == 1)
+        try expect("Scanned original unmodified", Data(contentsOf: scan) == imageSource)
+        print("Passed PDF discovery, extraction, literal search, incremental updates, offline retention, schema migration, and image-only OCR.")
     }
 }
