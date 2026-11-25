@@ -5,11 +5,13 @@ import PDFKit
 private func makeBook(_ url: URL, _ pages: [String]) throws {
     var box = CGRect(x: 0, y: 0, width: 500, height: 320)
     guard let context = CGContext(url as CFURL, mediaBox: &box, nil) else { throw LibraryError("Fixture writer failed") }
-    for line in pages {
+    for content in pages {
         context.beginPDFPage(nil)
-        context.textPosition = CGPoint(x: 35, y: 200)
-        let text = NSAttributedString(string: line, attributes: [.font: NSFont.systemFont(ofSize: 18)])
-        CTLineDraw(CTLineCreateWithAttributedString(text), context)
+        for (row, line) in content.components(separatedBy: "\n").enumerated() {
+            context.textPosition = CGPoint(x: 35, y: 200 - row * 28)
+            let text = NSAttributedString(string: line, attributes: [.font: NSFont.systemFont(ofSize: 18)])
+            CTLineDraw(CTLineCreateWithAttributedString(text), context)
+        }
         context.endPDFPage()
     }
     context.closePDF()
@@ -49,7 +51,7 @@ private func makeScan(_ url: URL) throws {
         try FileManager.default.createDirectory(at: books, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temp) }
         let source = books.appendingPathComponent("Field guide.pdf")
-        try makeBook(source, ["Café orchard", "城市图书馆", "Find \"literal\" words"])
+        try makeBook(source, ["Café\norchard", "城市图书馆", "Find \"literal\" words"])
         let before = try Data(contentsOf: source)
         let blank = books.appendingPathComponent("Blank.pdf")
         try makeBook(blank, [""])
@@ -65,6 +67,17 @@ private func makeScan(_ url: URL) throws {
         try expect("Upgrade retained old books", lib.refresh().reused == 2)
         try expect("Original modified", Data(contentsOf: source) == before)
         try expect("Case and accent folding", lib.search("CAFE").map(\.page) == [1])
+        let phrase = "CAFE  orchard"
+        try expect("Index can find a line-wrapped phrase", lib.search(phrase).map(\.page) == [1])
+        let document = PDFDocument(url: source)
+        guard let page = document?.page(at: 0), let body = page.string else { throw LibraryError("Fixture has no page text") }
+        guard
+              body.contains("\n"), let range = Library.selectionRange(for: phrase, in: body),
+              let selected = page.selection(for: range)?.string else { throw LibraryError("Missing PDF selection for " + body.debugDescription) }
+        try expect("Selection spans the original lines", Library.key(selected) == Library.key(phrase))
+        let unicode = "📖 before ﬃ\t\nＦＯＯ after"
+        let mapped = Library.selectionRange(for: "ffi foo", in: unicode)
+        try expect("Expanded ligatures and UTF-16 offsets", mapped.map { (unicode as NSString).substring(with: $0) } == "ﬃ\t\nＦＯＯ")
         try expect("Short CJK query", lib.search("图书").map(\.page) == [2])
         try expect("Indexed CJK query", lib.search("图书馆").map(\.page) == [2])
         try expect("Literal syntax", lib.search("\"literal\"").map(\.page) == [3])

@@ -41,6 +41,46 @@ struct Library {
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
     }
 
+    /// Return PDFKit character offsets even when indexing collapsed spaces or line breaks.
+    static func selectionRange(for query: String, in body: String) -> NSRange? {
+        let needle = key(query)
+        guard !needle.isEmpty else { return nil }
+        if let direct = body.range(of: clean(query), options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive]) {
+            return NSRange(direct, in: body)
+        }
+        let locale = Locale(identifier: "en_US_POSIX")
+        var normalized = ""
+        var sourceRanges = [NSRange]()
+        var offset = 0
+        var pendingSpace: NSRange?
+        for character in body {
+            let raw = String(character)
+            let source = NSRange(location: offset, length: raw.utf16.count)
+            offset = NSMaxRange(source)
+            let compatible = raw.precomposedStringWithCompatibilityMapping
+            let folded = compatible.folding(options: [.caseInsensitive, .diacriticInsensitive],
+                                             locale: locale)
+            for unit in folded {
+                if unit.isWhitespace || unit == "\0" {
+                    if !normalized.isEmpty {
+                        pendingSpace = pendingSpace.map { NSUnionRange($0, source) } ?? source
+                    }
+                } else {
+                    if let space = pendingSpace {
+                        normalized.append(" ")
+                        sourceRanges.append(space)
+                        pendingSpace = nil
+                    }
+                    normalized.append(unit)
+                    sourceRanges.append(contentsOf: repeatElement(source, count: String(unit).utf16.count))
+                }
+            }
+        }
+        let match = (normalized as NSString).range(of: needle, options: .literal)
+        guard match.location != NSNotFound else { return nil }
+        return NSUnionRange(sourceRanges[match.location], sourceRanges[NSMaxRange(match) - 1])
+    }
+
     private func stamp(_ url: URL) throws -> (size: Int64, modified: Int64) {
         var info = stat()
         guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { throw LibraryError("Cannot read " + url.lastPathComponent) }

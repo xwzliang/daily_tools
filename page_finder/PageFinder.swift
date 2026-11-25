@@ -124,8 +124,8 @@ struct BookPage: NSViewRepresentable {
         }
         guard let target = view.document?.page(at: page - 1) else { return }
         view.go(to: target)
-        if let body = target.string, let range = body.range(of: query, options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive]),
-           let selection = target.selection(for: NSRange(range, in: body)) {
+        if let body = target.string, let range = Library.selectionRange(for: query, in: body),
+           let selection = target.selection(for: range) {
             view.setCurrentSelection(selection, animate: false)
         } else { view.clearSelection() }
     }
