@@ -86,6 +86,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Checks ---
+if [[ -z "$TOKEN" && "${JELLYFIN_URL%/}" == "http://imac.local:8096" ]]; then
+  TOKEN="8ff4ba42ecee43a5a1f804dfd692783b"
+fi
 if ! command -v jq >/dev/null 2>&1; then
   echo "Error: 'jq' is required." >&2; exit 1
 fi

@@ -22,7 +22,11 @@ test -z "${JELLYFIN_TOKEN:-}"
 test "$1" = "-H"
 test "$2" = "@-"
 read -r header
-test "$header" = "X-MediaBrowser-Token: fixture-secret"
+if [ "${EXPECT_LOCAL_DEFAULT:-}" = 1 ]; then
+  case "$header" in "X-MediaBrowser-Token: "?*) ;; *) exit 43 ;; esac
+else
+  test "$header" = "X-MediaBrowser-Token: fixture-secret"
+fi
 case "$*" in
   *Seasons*) echo '{"Items":[{"IndexNumber":1,"Id":"season"}]}' ;;
   *ParentId=season*) echo '{"Items":[{"IndexNumber":1,"Id":"episode"}]}' ;;
@@ -46,6 +50,12 @@ esac
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("JELLYFIN_TOKEN", result.stderr)
             self.assertFalse((self.folder / "calls").exists())
+
+    def test_local_server_uses_its_default(self):
+        self.env["EXPECT_LOCAL_DEFAULT"] = "1"
+        result = self.invoke("--url", "http://imac.local:8096")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Would WATCH episode", result.stdout)
 
     def test_token_passed_privately_to_both_requests(self):
         for args in ([], ["--token", "fixture-secret"]):
