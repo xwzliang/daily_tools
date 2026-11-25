@@ -1,24 +1,58 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+"""Convert a DjVu book to a PDF and, by default, a searchable OCR copy."""
 
+import argparse
 import os
+from pathlib import Path
+import subprocess
 import sys
-import re
+from tempfile import TemporaryDirectory
+
+from daily_tools_lib.publication import move_without_overwrite
 
 
-def rm_invalid_chars(filename):
-    filename_replace_invalid_chars = re.sub("[^A-Za-z0-9._-]", "_", filename)
-    if os.path.exists(filename):
-        os.rename(filename, filename_replace_invalid_chars)
-    return filename_replace_invalid_chars
+def convert(source, *, ocr=True):
+    if source.suffix.lower() not in {".djvu", ".djv"}:
+        raise ValueError(f"Expected a .djvu or .djv file: {source}")
+    if not source.is_file():
+        raise FileNotFoundError(f"Input file not found: {source}")
+    pdf = source.with_suffix(".pdf")
+    outputs = [pdf]
+    if ocr:
+        outputs.append(source.with_suffix(".ocr.pdf"))
+    for destination in outputs:
+        if os.path.lexists(destination):
+            raise FileExistsError(f"Output already exists: {destination}")
+
+    with TemporaryDirectory(prefix=".djvu-pdf-", dir=source.parent) as tmp:
+        decoded = Path(tmp).absolute() / "decoded.pdf"
+        subprocess.run(["ddjvu", "-format=pdf", "-quality=150", "-verbose",
+                        source.absolute(), decoded], check=True)
+        staged = [decoded]
+        if ocr:
+            searchable = decoded.with_name("searchable.pdf")
+            subprocess.run(["ocrmypdf", decoded, searchable], check=True)
+            staged.append(searchable)
+        for path in staged:
+            with path.open("rb") as candidate:
+                if candidate.read(5) != b"%PDF-":
+                    raise ValueError(f"Conversion produced no PDF in {path.name}")
+        for path, destination in zip(staged, outputs):
+            move_without_overwrite(path, destination)
+    return outputs
 
 
-djvu = rm_invalid_chars(sys.argv[1])
-djvu2pdf = djvu.replace(".djvu", ".pdf")
-ocr_pdf = djvu2pdf.replace(".pdf", ".ocr.pdf")
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=Path)
+    parser.add_argument("--no-ocr", action="store_true", help="create only the image PDF using ddjvu")
+    args = parser.parse_args()
+    try:
+        for output in convert(args.source, ocr=not args.no_ocr):
+            print(output)
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        sys.exit(str(error))
 
-# Use ddjvu to convert djvu to pdf
-os.system("ddjvu -format=pdf -quality=150 -verbose {} {}".format(djvu, djvu2pdf))
 
-print("Start ocr pdf...")
-# Use ocrmypdf to ocr pdf
-os.system("ocrmypdf {} {}".format(djvu2pdf, ocr_pdf))
+if __name__ == "__main__":
+    main()
