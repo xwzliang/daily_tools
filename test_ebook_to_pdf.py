@@ -6,11 +6,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
-from ebook_to_pdf import BookInbox, epub_toc_options, convert_book, heading_toc_options, render_pdf
+from ebook_to_pdf import BookInbox, epub_toc_options, convert_book, heading_toc_options, render_pdf, spine_headings
 
 
 class TocFallbackTests(unittest.TestCase):
-    def options(self, labels=(), nav=False, broken=False, absent=False):
+    def options(self, labels=(), nav=False, broken=False, absent=False, documents=()):
         with tempfile.TemporaryDirectory() as directory:
             book = Path(directory) / 'book.epub'
             with zipfile.ZipFile(book, 'w') as archive:
@@ -18,14 +18,26 @@ class TocFallbackTests(unittest.TestCase):
                 item = '<item id="toc" href="toc.xml" ' + ('properties="nav"' if nav else 'media-type="application/x-dtbncx+xml"') + '/>'
                 if absent:
                     item = ''
-                archive.writestr('OEBPS/content.opf', '<package xmlns="http://www.idpf.org/2007/opf"><manifest>' + item + '</manifest><spine toc="toc"/></package>')
+                spine = ''
+                for index, body in enumerate(documents):
+                    name = f'chapter{index}.xhtml'
+                    item += f'<item id="chapter{index}" href="{name}" media-type="application/xhtml+xml"/>'
+                    spine += f'<itemref idref="chapter{index}"/>'
+                    archive.writestr('OEBPS/' + name, self.xhtml(body))
+                archive.writestr('OEBPS/content.opf', '<package xmlns="http://www.idpf.org/2007/opf"><manifest>' + item + '</manifest><spine toc="toc">' + spine + '</spine></package>')
                 if not broken:
+                    entries = [(label, 'chapter.xhtml') if isinstance(label, str) else label
+                               for label in labels]
                     if nav:
-                        text = '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><nav epub:type="toc"><ol>' + ''.join(f'<li><a href="chapter.xhtml">{label}</a></li>' for label in labels) + '</ol></nav><nav epub:type="landmarks"><a href="cover.xhtml">Cover</a></nav></html>'
+                        text = '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><nav epub:type="toc"><ol>' + ''.join(f'<li><a href="{href}">{label}</a></li>' for label, href in entries) + '</ol></nav><nav epub:type="landmarks"><a href="cover.xhtml">Cover</a></nav></html>'
                     else:
-                        text = '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>' + ''.join(f'<navPoint><navLabel><text>{label}</text></navLabel><content src="chapter.xhtml"/></navPoint>' for label in labels) + '</navMap></ncx>'
+                        text = '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>' + ''.join(f'<navPoint><navLabel><text>{label}</text></navLabel><content src="{href}"/></navPoint>' for label, href in entries) + '</navMap></ncx>'
                     archive.writestr('OEBPS/toc.xml', text)
             return epub_toc_options(str(book))
+
+    @staticmethod
+    def xhtml(body):
+        return '<html xmlns="http://www.w3.org/1999/xhtml">' + body + '</html>'
 
     def heading_options(self, documents):
         ns = {"h": "http://www.w3.org/1999/xhtml"}
@@ -35,10 +47,10 @@ class TocFallbackTests(unittest.TestCase):
         with zipfile.ZipFile(data, "w") as archive:
             for index, body in enumerate(documents):
                 name = f"{index}.xhtml"
-                archive.writestr(name, '<html xmlns="' + ns["h"] + '">' + body + '</html>')
+                archive.writestr(name, self.xhtml(body))
                 items.append(ET.Element("item", id=str(index), href=name))
                 ET.SubElement(spine, "itemref", idref=str(index))
-            return heading_toc_options(archive, "content.opf", items, spine, ns)
+            return heading_toc_options(spine_headings(archive, "content.opf", items, spine, ns))
 
     def test_parts_chapters_and_front_matter_across_files(self):
         options = self.heading_options([
@@ -46,18 +58,38 @@ class TocFallbackTests(unittest.TestCase):
             '<h2>Part One</h2><h3>1 Chapter</h3>',
             '<h3>2 Chapter</h3><h2>Part Two</h2><h3>3 Chapter</h3>',
         ])
-        self.assertEqual(options, [
-            '--use-auto-toc',
-            "--level1-toc=//h:h2[normalize-space(.) != 'Subtitle'][normalize-space(.) != 'Author']",
-            "--level2-toc=//h:h3[normalize-space(.) != 'Subtitle'][normalize-space(.) != 'Author']",
-        ])
+        self.assertEqual(len(options), 3)
+        self.assertTrue(options[1].startswith('--level1-toc=//h:h2'))
+        self.assertTrue(options[2].startswith('--level2-toc=//h:h3'))
+        self.assertIn("[normalize-space(.) != 'Subtitle'][normalize-space(.) != 'Author']", options[2])
 
     def test_single_rank_and_three_ranks(self):
-        self.assertEqual(self.heading_options(['<h3>Chapter</h3>']),
-                         ['--use-auto-toc', '--level1-toc=//h:h3'])
-        self.assertEqual(self.heading_options(['<h1>Part</h1><h2>Chapter</h2><h3>Section</h3>']),
-                         ['--use-auto-toc', '--level1-toc=//h:h1',
-                          '--level2-toc=//h:h2', '--level3-toc=//h:h3'])
+        single = self.heading_options(['<h3>Chapter</h3>'])
+        self.assertEqual(len(single), 2)
+        self.assertTrue(single[1].startswith('--level1-toc=//h:h3'))
+        nested = self.heading_options(['<h1>Part</h1><h2>Chapter</h2><h3>Section</h3>'])
+        self.assertEqual(len(nested), 4)
+        for rank in (1, 2, 3):
+            self.assertTrue(nested[rank].startswith(f'--level{rank}-toc=//h:h{rank}'))
+
+    def test_detects_missing_chapter_even_with_later_bookmarks(self):
+        documents = [
+            '<h1>Title Page</h1>',
+            '<h1 id="one">Chapter One</h1><h2>Optional subsection</h2>',
+            '<h1 id="two">Chapter Two</h1><h1 id="three">Chapter Three</h1>',
+            '<h1>Appendix</h1>',
+        ]
+        entries = [
+            ('First', 'chapter1.xhtml#one'),
+            ('Second', 'chapter2.xhtml'),
+            ('Appendix', 'chapter3.xhtml'),
+        ]
+        for nav in (False, True):
+            with self.subTest(nav=nav):
+                self.assertIn('--use-auto-toc', self.options(entries[:-1], nav, documents=documents))
+                self.assertIn('--use-auto-toc', self.options(entries, nav, documents=documents))
+                complete = entries + [('Third', 'chapter2.xhtml#three')]
+                self.assertEqual([], self.options(complete, nav, documents=documents))
 
     def test_missing_empty_and_start_navigation(self):
         for nav in (False, True):

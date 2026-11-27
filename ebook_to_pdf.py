@@ -14,7 +14,7 @@ import subprocess
 import posixpath
 import zipfile
 import xml.etree.ElementTree as ET
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 from daily_tools_lib.publication import move_without_overwrite
 
@@ -92,33 +92,73 @@ def clean_ebook_filename(ebook_path, preserve_unicode=False):
     return os.path.join(directory, name_cleaned + ext)
 
 
-def heading_toc_options(archive, opf_path, items, spine, ns):
-    """Map heading ranks to TOC levels, ignoring headings before the first root.
+def epub_target(document, href):
+    """Resolve an EPUB link into an archive path and fragment."""
+    try:
+        link = urlsplit(href)
+    except ValueError:
+        return None
+    if link.scheme or link.netloc:
+        return None
+    path = (posixpath.normpath(posixpath.join(posixpath.dirname(document), unquote(link.path)))
+            if link.path else document)
+    return path, unquote(link.fragment)
 
-    Some EPUBs put subtitle/author h3s before their first part h2. Read in
-    spine order (including across files) so those do not become TOC entries.
-    """
+
+def spine_headings(archive, opf_path, items, spine, ns):
     headings = []
     by_id = {item.get("id"): item for item in items}
+    tags = {f"{{{ns['h']}}}h{rank}": rank for rank in (1, 2, 3)}
     for ref in spine if spine is not None else []:
         item = by_id.get(ref.get("idref"))
         if item is None or ref.get("linear") == "no":
             continue
-        path = posixpath.normpath(posixpath.join(
-            posixpath.dirname(opf_path), unquote(item.get("href", ""))))
+        target = epub_target(opf_path, item.get("href", ""))
+        if target is None:
+            continue
+        path, _ = target
         try:
             document = ET.fromstring(archive.read(path))
         except (KeyError, ET.ParseError):
             continue
         for element in document.iter():
-            for rank in (1, 2, 3):
-                if element.tag == "{" + ns["h"] + "}h" + str(rank):
-                    text = " ".join("".join(element.itertext()).split())
-                    if text:
-                        headings.append((rank, text))
-    ranks = sorted({rank for rank, _ in headings}) or [1, 2, 3]
+            rank = tags.get(element.tag)
+            if rank is not None:
+                title = " ".join("".join(element.itertext()).split())
+                if title:
+                    headings.append((rank, title, (path, element.get("id", ""))))
+    return headings
+
+
+def incomplete_toc(headings, entries):
+    """Check chapter-level coverage, allowing the publisher to omit subheadings."""
+    targets = {target for _, target in entries}
+    labels = {(path, title.casefold()) for title, (path, _) in entries}
+    coverage = {}
+    seen_paths = set()
+    for rank, title, (path, fragment) in headings:
+        present = (
+            (bool(fragment) and (path, fragment) in targets)
+            or (path, title.casefold()) in labels
+            or (path not in seen_paths and (path, "") in targets)
+        )
+        if title.casefold() not in {"contents", "table of contents"}:
+            coverage.setdefault(rank, []).append(present)
+        seen_paths.add(path)
+
+    # Derive the chapter rank from the TOC itself. Ignore front matter before
+    # the first covered chapter and preserve TOCs with no reliable comparison.
+    for _, chapters in sorted(coverage.items()):
+        if any(chapters):
+            return not all(chapters[chapters.index(True):])
+    return False
+
+
+def heading_toc_options(headings):
+    """Map heading ranks to TOC levels, ignoring headings before the first root."""
+    ranks = sorted({rank for rank, _, _ in headings}) or [1, 2, 3]
     excluded = []
-    for rank, text in headings:
+    for rank, text, _ in headings:
         if rank == ranks[0]:
             break
         excluded.append(text)
@@ -130,14 +170,19 @@ def heading_toc_options(archive, opf_path, items, spine, ns):
 
     predicate = "".join(
         "[normalize-space(.) != " + xpath_literal(text) + "]" for text in excluded)
-    return ["--use-auto-toc"] + [
-        f"--level{level}-toc=//h:h{rank}{predicate}"
-        for level, rank in enumerate(ranks, 1)
-    ]
+    options = ["--use-auto-toc"]
+    for level, rank in enumerate(ranks, 1):
+        heading = f"//h:h{rank}[normalize-space()]{predicate}"
+        # Some converted EPUBs wrap body paragraphs inside a heading. Keep
+        # the leading title span without using the body text as a bookmark.
+        has_title_span = "h:p and *[1][self::h:span] and not(text()[normalize-space()])"
+        options.append(f"--level{level}-toc={heading}[not({has_title_span})]"
+                       f" | {heading}[{has_title_span}]/h:span[1]")
+    return options
 
 
 def epub_toc_options(ebook):
-    """Rebuild missing/placeholder EPUB navigation, leaving useful TOCs intact."""
+    """Rebuild missing or incomplete EPUB navigation."""
     if not ebook.lower().endswith(".epub"):
         return []
 
@@ -156,41 +201,50 @@ def epub_toc_options(ebook):
             items = package.findall("opf:manifest/opf:item", ns)
             spine = package.find("opf:spine", ns)
             ncx_id = spine.get("toc") if spine is not None else None
-            labels = []
+            entries = []
             for item in items:
                 is_nav = "nav" in item.get("properties", "").split()
                 is_ncx = (item.get("id") == ncx_id or
                           item.get("media-type") == "application/x-dtbncx+xml")
                 if not (is_nav or is_ncx):
                     continue
-                path = posixpath.normpath(posixpath.join(
-                    posixpath.dirname(opf_path), unquote(item.attrib["href"])))
+                target = epub_target(opf_path, item.attrib["href"])
+                if target is None:
+                    continue
+                path, _ = target
                 try:
                     navigation = ET.fromstring(archive.read(path))
                 except (KeyError, ET.ParseError):
                     continue  # Missing/broken navigation can be rebuilt from headings.
+                links = []
                 if is_nav:
                     for nav in navigation.findall(".//h:nav", ns):
                         kind = nav.get("{http://www.idpf.org/2007/ops}type", "")
                         if "toc" in kind.split():
-                            labels.extend(" ".join(a.itertext()).strip()
-                                          for a in nav.findall(".//h:a", ns)
-                                          if a.get("href"))
+                            links.extend((a, a.get("href")) for a in nav.findall(".//h:a", ns))
                 else:
                     for point in navigation.findall(".//ncx:navPoint", ns):
                         label = point.find("ncx:navLabel", ns)
                         content = point.find("ncx:content", ns)
                         if label is not None and content is not None and content.get("src"):
-                            labels.append(" ".join(label.itertext()).strip())
-            if any(label and label.casefold() != "start" for label in labels):
+                            links.append((label, content.get("src")))
+                for label, href in links:
+                    title = " ".join("".join(label.itertext()).split())
+                    if title and title.casefold() != "start" and href:
+                        destination = epub_target(path, href)
+                        if destination is not None:
+                            entries.append((title, destination))
+            headings = spine_headings(archive, opf_path, items, spine, ns)
+            if entries and not incomplete_toc(headings, entries):
                 return []
-            options = heading_toc_options(archive, opf_path, items, spine, ns)
+            options = heading_toc_options(headings)
     except (OSError, zipfile.BadZipFile, KeyError, AttributeError, ET.ParseError) as error:
         # Let Calibre handle inputs we cannot inspect; never override unknown navigation.
         print(f"Could not inspect EPUB navigation: {error}", file=sys.stderr)
         return []
 
-    print("EPUB navigation is missing or only Start; generating TOC from headings.")
+    reason = "incomplete" if entries else "missing or only Start"
+    print(f"EPUB navigation is {reason}; generating TOC from headings.")
     return options
 
 
